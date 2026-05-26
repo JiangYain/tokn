@@ -1,5 +1,7 @@
 # Tokn
 
+![Tokn screenshot](./docs/tokn-screenshot.png)
+
 Tokn is a tray-first Windows desktop app for monitoring token usage from Codex and Cursor in one compact panel.
 
 It is built with Electron, Vite, React, and TypeScript. The app lives in the Windows tray, opens as a lightweight bottom-right panel, and can install itself as a portable per-user app with startup enabled.
