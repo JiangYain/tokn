@@ -52,6 +52,32 @@ export function App() {
     void runReport(appOptions);
   }, [appOptions, autoloaded]);
 
+  useEffect(() => {
+    if (!defaults || !dateFrom || !dateTo) {
+      return;
+    }
+
+    const syncOnFocus = () => {
+      void syncDefaultsAndMaybeRefresh(false);
+    };
+    const syncOnVisible = () => {
+      if (document.visibilityState === "visible") {
+        void syncDefaultsAndMaybeRefresh(false);
+      }
+    };
+    const timer = window.setInterval(() => {
+      void syncDefaultsAndMaybeRefresh(false);
+    }, 60_000);
+
+    window.addEventListener("focus", syncOnFocus);
+    document.addEventListener("visibilitychange", syncOnVisible);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("focus", syncOnFocus);
+      document.removeEventListener("visibilitychange", syncOnVisible);
+    };
+  }, [defaults, dateFrom, dateTo, timeScale]);
+
   async function runReport(options: AppReportOptions) {
     setLoading(true);
     setError(null);
@@ -62,6 +88,63 @@ export function App() {
     } finally {
       setLoading(false);
     }
+  }
+
+  async function syncDefaultsAndMaybeRefresh(forceRefresh: boolean) {
+    const nextDefaults = await bridge.getDefaults();
+    const defaultsChanged =
+      !defaults ||
+      nextDefaults.from !== defaults.from ||
+      nextDefaults.to !== defaults.to ||
+      nextDefaults.timezone !== defaults.timezone ||
+      nextDefaults.codexRoot !== defaults.codexRoot ||
+      nextDefaults.outDir !== defaults.outDir ||
+      nextDefaults.cursorAppDir !== defaults.cursorAppDir ||
+      nextDefaults.cursorCliConfigPath !== defaults.cursorCliConfigPath;
+
+    if (!defaults || !dateFrom || !dateTo) {
+      if (defaultsChanged) {
+        setDefaults(nextDefaults);
+      }
+      setDateFrom(nextDefaults.from);
+      setDateTo(nextDefaults.to);
+      setTimeScale("custom");
+      if (forceRefresh) {
+        await runReport(createReportOptions(nextDefaults, nextDefaults.from, nextDefaults.to));
+      }
+      return;
+    }
+
+    let nextFrom = dateFrom;
+    let nextTo = dateTo;
+    let shouldRefresh = forceRefresh;
+
+    if (timeScale === "custom") {
+      if (dateTo === defaults.to) {
+        nextTo = nextDefaults.to;
+        if (dateFrom === defaults.from) {
+          nextFrom = nextDefaults.from;
+        }
+        shouldRefresh ||= nextFrom !== dateFrom || nextTo !== dateTo;
+      }
+    } else {
+      const nextRange = buildScaledRange(nextDefaults.to, timeScale);
+      nextFrom = nextRange.from;
+      nextTo = nextRange.to;
+      shouldRefresh ||= nextFrom !== dateFrom || nextTo !== dateTo;
+    }
+
+    if (defaultsChanged) {
+      setDefaults(nextDefaults);
+    }
+
+    if (!shouldRefresh) {
+      return;
+    }
+
+    setDateFrom(nextFrom);
+    setDateTo(nextTo);
+    await runReport(createReportOptions(nextDefaults, nextFrom, nextTo));
   }
 
   function handleDateChange(from: string, to: string) {
@@ -116,8 +199,8 @@ export function App() {
             <button
               className={`btn-refresh${loading ? " btn-refresh-loading" : ""}`}
               onClick={() => {
-                if (appOptions) {
-                  void runReport(appOptions);
+                if (dateFrom && dateTo) {
+                  void syncDefaultsAndMaybeRefresh(true);
                 }
               }}
               disabled={!appOptions || loading}
