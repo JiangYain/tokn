@@ -145,6 +145,7 @@ code {
 }
 
 .btn-refresh,
+.btn-pin,
 .btn-secondary,
 .scale-chip {
   transition:
@@ -154,7 +155,8 @@ code {
     opacity 160ms ease;
 }
 
-.btn-refresh {
+.btn-refresh,
+.btn-pin {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -168,8 +170,18 @@ code {
   line-height: 1;
 }
 
-.btn-refresh:hover:not(:disabled) {
+.btn-refresh:hover:not(:disabled),
+.btn-pin:hover:not(:disabled) {
   color: var(--text-strong);
+}
+
+/* 钉住态：图钉点亮为主题色并轻微倾斜，提示面板将保持显示 */
+.btn-pin-active {
+  color: var(--accent);
+}
+
+.btn-pin-active svg {
+  transform: rotate(-30deg);
 }
 
 .btn-refresh:disabled {

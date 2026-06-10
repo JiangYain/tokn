@@ -20,6 +20,8 @@ const PANEL_EDGE_MARGIN = 4;
 let panelWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
 let isQuitting = false;
+// 图钉状态：钉住时面板失焦不自动隐藏
+let isPanelPinned = false;
 let lastTrayBounds: Rectangle | null = null;
 let staticServer: Server | null = null;
 let staticServerUrl: string | null = null;
@@ -50,8 +52,9 @@ async function createPanelWindow() {
   });
   panelWindow = window;
 
+  // 默认失焦自动隐藏；用户点了右上角图钉后保持显示
   window.on("blur", () => {
-    if (!isQuitting) {
+    if (!isQuitting && !isPanelPinned) {
       window.hide();
     }
   });
@@ -133,16 +136,26 @@ async function createTray() {
 
   const nextTray = new Tray(image);
   nextTray.setToolTip("Tokn");
+  // 点托盘图标切换面板显隐；面板失焦不再自动隐藏（macOS 上易误触）
   nextTray.on("right-click", (_event, bounds) => {
     lastTrayBounds = bounds;
-    void showPanel(bounds);
+    void togglePanel(bounds);
   });
   nextTray.on("click", (_event, bounds) => {
     lastTrayBounds = bounds;
-    void showPanel(bounds);
+    void togglePanel(bounds);
   });
 
   return nextTray;
+}
+
+/** 托盘图标点击入口：面板可见则隐藏，否则定位到托盘附近并显示 */
+async function togglePanel(bounds?: Rectangle) {
+  if (panelWindow && !panelWindow.isDestroyed() && panelWindow.isVisible()) {
+    panelWindow.hide();
+    return;
+  }
+  await showPanel(bounds);
 }
 
 async function showPanel(bounds?: Rectangle) {
@@ -297,6 +310,38 @@ function getContentType(filePath: string) {
   return "application/octet-stream";
 }
 
+// 面板「启动本地 CLI」按钮支持的目标：appId → 命令名
+const LOCAL_APP_COMMANDS: Record<string, string> = {
+  claudeCode: "claude",
+  opencode: "opencode",
+  amp: "amp",
+};
+
+/** 按操作系统在新终端窗口中启动 CLI：Windows 用 cmd start，macOS 用 Terminal.app（登录 shell 自带用户 PATH），Linux 用默认终端模拟器 */
+function launchCliInTerminal(command: string) {
+  if (process.platform === "win32") {
+    const cmdPath = path.join(process.env.APPDATA || "", "npm", `${command}.cmd`);
+    spawn("cmd.exe", ["/c", "start", "", cmdPath], {
+      detached: true,
+      stdio: "ignore",
+      windowsHide: false,
+    }).unref();
+    return;
+  }
+  if (process.platform === "darwin") {
+    spawn(
+      "osascript",
+      [
+        "-e", `tell application "Terminal" to do script "${command}"`,
+        "-e", 'tell application "Terminal" to activate',
+      ],
+      { detached: true, stdio: "ignore" },
+    ).unref();
+    return;
+  }
+  spawn("x-terminal-emulator", ["-e", command], { detached: true, stdio: "ignore" }).unref();
+}
+
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
 
 if (!hasSingleInstanceLock) {
@@ -328,38 +373,20 @@ if (!hasSingleInstanceLock) {
     });
 
     ipcMain.handle("app:launch-local", async (_event, appId: string) => {
-      if (appId === "claudeCode") {
-        const claudeCmd = path.join(process.env.APPDATA || "", "npm", "claude.cmd");
-        spawn("cmd.exe", ["/c", "start", "", claudeCmd], {
-          detached: true,
-          stdio: "ignore",
-          windowsHide: false,
-        }).unref();
-        return;
+      const command = LOCAL_APP_COMMANDS[appId];
+      if (!command) {
+        throw new Error(`Unsupported local app launch target: ${appId}`);
       }
-      if (appId === "opencode") {
-        const openCodeCmd = path.join(process.env.APPDATA || "", "npm", "opencode.cmd");
-        spawn("cmd.exe", ["/c", "start", "", openCodeCmd], {
-          detached: true,
-          stdio: "ignore",
-          windowsHide: false,
-        }).unref();
-        return;
-      }
-      if (appId === "amp") {
-        const ampCmd = path.join(process.env.APPDATA || "", "npm", "amp.cmd");
-        spawn("cmd.exe", ["/c", "start", "", ampCmd], {
-          detached: true,
-          stdio: "ignore",
-          windowsHide: false,
-        }).unref();
-        return;
-      }
-      throw new Error(`Unsupported local app launch target: ${appId}`);
+      launchCliInTerminal(command);
     });
 
     ipcMain.handle("report:run", async (_event, options: AppReportOptions) => {
       return generateReport(options);
+    });
+
+    ipcMain.handle("panel:set-pinned", async (_event, pinned: boolean) => {
+      isPanelPinned = Boolean(pinned);
+      return isPanelPinned;
     });
 
     ipcMain.handle("usage:get-limits", async () => {

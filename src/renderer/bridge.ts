@@ -8,6 +8,8 @@ export interface TokenMonitorBridge {
   openExternal: (targetUrl: string) => Promise<void>;
   pickDirectory: (currentPath?: string) => Promise<string | null>;
   runReport: (options: AppReportOptions) => Promise<GenerateReportResult>;
+  /** 设置面板图钉状态；仅桌面端生效，web/preview 为 no-op */
+  setPanelPinned: (pinned: boolean) => Promise<boolean>;
   getUsageLimits: () => Promise<UsageLimitsSnapshot>;
   inspectCursorAuth: (options: AppReportOptions) => Promise<CursorAuth>;
 }
@@ -63,6 +65,9 @@ function createWebBridge(): TokenMonitorBridge {
         body: JSON.stringify(options),
       });
     },
+    async setPanelPinned(pinned) {
+      return pinned;
+    },
     async getUsageLimits() {
       return fetchJson<UsageLimitsSnapshot>("/__token-monitor/usage-limits", {
         method: "GET",
@@ -109,6 +114,9 @@ function createPreviewBridge(): TokenMonitorBridge {
     async runReport(options) {
       return buildPreviewReport(options);
     },
+    async setPanelPinned(pinned) {
+      return pinned;
+    },
     async getUsageLimits() {
       return {
         fetchedAt: new Date().toISOString(),
@@ -118,6 +126,13 @@ function createPreviewBridge(): TokenMonitorBridge {
           planType: "plus",
           primaryWindow: { usedPercent: 78, resetAt: new Date(Date.now() + 14.5 * 60 * 60 * 1000).toISOString(), limitWindowSeconds: 18_000 },
           secondaryWindow: { usedPercent: 75, resetAt: new Date(Date.now() + 4.2 * 24 * 60 * 60 * 1000).toISOString(), limitWindowSeconds: 604_800 },
+        },
+        claude: {
+          configured: true,
+          error: null,
+          planType: "max",
+          primaryWindow: { usedPercent: 42, resetAt: new Date(Date.now() + 2.5 * 60 * 60 * 1000).toISOString(), limitWindowSeconds: 18_000 },
+          secondaryWindow: { usedPercent: 31, resetAt: new Date(Date.now() + 3.1 * 24 * 60 * 60 * 1000).toISOString(), limitWindowSeconds: 604_800 },
         },
         cursor: {
           configured: true,
@@ -173,6 +188,11 @@ function buildPreviewReport(options: AppReportOptions): GenerateReportResult {
     counts: {
       codexEvents: 218,
       cursorEvents: 41,
+    },
+    sourceTotals: {
+      codex: rows.reduce((sum, row) => sum + row.codexTotalTokens, 0),
+      claude: 0,
+      cursor: rows.reduce((sum, row) => sum + row.cursorTotalTokens, 0),
     },
     rows,
     summary,

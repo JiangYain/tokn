@@ -10,6 +10,7 @@ contextBridge.exposeInMainWorld("tokenMonitor", {
     ipcRenderer.invoke("app:pick-directory", currentPath) as Promise<string | null>,
   runReport: (options: AppReportOptions) =>
     ipcRenderer.invoke("report:run", options) as Promise<GenerateReportResult>,
+  setPanelPinned: (pinned: boolean) => ipcRenderer.invoke("panel:set-pinned", pinned) as Promise<boolean>,
   getUsageLimits: () => ipcRenderer.invoke("usage:get-limits") as Promise<UsageLimitsSnapshot>,
   inspectCursorAuth: (options: AppReportOptions) =>
     ipcRenderer.invoke("cursor:inspect-auth", options) as Promise<CursorAuth>,

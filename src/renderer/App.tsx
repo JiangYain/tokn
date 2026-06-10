@@ -35,6 +35,8 @@ export function App() {
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [timeScale, setTimeScale] = useState<TimeScale>("custom");
+  // 图钉：钉住后面板失焦不自动隐藏（仅桌面端有意义）
+  const [pinned, setPinned] = useState(false);
 
   useEffect(() => {
     void bridge.getDefaults().then((value) => {
@@ -217,6 +219,24 @@ export function App() {
             </div>
           </div>
           <div className="topbar-right">
+            {bridge.mode === "desktop" && (
+              <button
+                className={`btn-pin${pinned ? " btn-pin-active" : ""}`}
+                onClick={() => {
+                  const next = !pinned;
+                  setPinned(next);
+                  void bridge.setPanelPinned(next);
+                }}
+                aria-pressed={pinned}
+                aria-label={pinned ? "Unpin panel" : "Pin panel"}
+                title={pinned ? "取消钉住（失焦自动隐藏）" : "钉住面板（保持显示）"}
+                type="button"
+              >
+                <svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor" aria-hidden="true">
+                  <path d="M16 3a1 1 0 0 1 1 1v1l-1 1v6l3 3v2h-6v5l-1 1-1-1v-5H5v-2l3-3V6L7 5V4a1 1 0 0 1 1-1h8z" />
+                </svg>
+              </button>
+            )}
             <button
               className={`btn-refresh${loading ? " btn-refresh-loading" : ""}`}
               onClick={() => {
@@ -300,7 +320,7 @@ export function App() {
             </section>
 
             <section className="panel panel-usage-surface">
-              <UsageLimitsBoard limits={usageLimits} error={usageLimitsError} />
+              <UsageLimitsBoard limits={usageLimits} error={usageLimitsError} sourceTotals={report?.sourceTotals ?? null} />
             </section>
 
             <section className="panel panel-aux">
@@ -398,11 +418,37 @@ function LoadingSkeleton() {
   );
 }
 
-function UsageLimitsBoard(props: { limits: UsageLimitsSnapshot | null; error: string | null }) {
-  return (
-    <div className="usage-limits-stack">
-      <div className="usage-limits-grid">
+function UsageLimitsBoard(props: {
+  limits: UsageLimitsSnapshot | null;
+  error: string | null;
+  sourceTotals: { codex: number; claude: number; cursor: number } | null;
+}) {
+  // 动态卡片：只显示本机实际在用的服务（有登录态 configured，或当前区间内有用量），并按用量降序排列
+  const cards = [
+    {
+      key: "claude",
+      tokens: props.sourceTotals?.claude ?? 0,
+      configured: props.limits?.claude?.configured ?? false,
+      node: (
         <UsageProviderCard
+          key="claude"
+          logoSrc="/brand-logos/claude-code.svg"
+          logoAlt="Claude Code"
+          note={props.limits?.claude?.planType ?? null}
+          status={buildClaudeStatus(props.limits?.claude, props.error)}
+        >
+          <UsageLimitRow label="5h" window={props.limits?.claude.primaryWindow ?? null} percentValue={getRemainingPercent(props.limits?.claude.primaryWindow ?? null)} />
+          <UsageLimitRow label="Week" window={props.limits?.claude.secondaryWindow ?? null} percentValue={getRemainingPercent(props.limits?.claude.secondaryWindow ?? null)} />
+        </UsageProviderCard>
+      ),
+    },
+    {
+      key: "codex",
+      tokens: props.sourceTotals?.codex ?? 0,
+      configured: props.limits?.codex.configured ?? false,
+      node: (
+        <UsageProviderCard
+          key="codex"
           logoSrc="/brand-logos/codex.svg"
           logoAlt="Codex"
           note={null}
@@ -411,7 +457,15 @@ function UsageLimitsBoard(props: { limits: UsageLimitsSnapshot | null; error: st
           <UsageLimitRow label="5h" window={props.limits?.codex.primaryWindow ?? null} percentValue={getRemainingPercent(props.limits?.codex.primaryWindow ?? null)} />
           <UsageLimitRow label="Week" window={props.limits?.codex.secondaryWindow ?? null} percentValue={getRemainingPercent(props.limits?.codex.secondaryWindow ?? null)} />
         </UsageProviderCard>
+      ),
+    },
+    {
+      key: "cursor",
+      tokens: props.sourceTotals?.cursor ?? 0,
+      configured: props.limits?.cursor.configured ?? false,
+      node: (
         <UsageProviderCard
+          key="cursor"
           logoSrc="/brand-logos/cursor.svg"
           logoAlt="Cursor"
           href={CURSOR_USAGE_URL}
@@ -425,7 +479,19 @@ function UsageLimitsBoard(props: { limits: UsageLimitsSnapshot | null; error: st
             secondaryValue={formatCursorRequests(props.limits?.cursor)}
           />
         </UsageProviderCard>
-      </div>
+      ),
+    },
+  ];
+
+  // 数据未就绪时全部占位显示，避免闪烁；就绪后过滤掉「未登录且无用量」的服务
+  const ready = props.limits !== null || props.sourceTotals !== null;
+  const visible = (ready ? cards.filter((card) => card.configured || card.tokens > 0) : cards).sort(
+    (a, b) => b.tokens - a.tokens,
+  );
+
+  return (
+    <div className="usage-limits-stack">
+      <div className="usage-limits-grid">{visible.map((card) => card.node)}</div>
       <div className="subscription-shortcuts">
         <button
           className="subscription-shortcut"
@@ -584,6 +650,16 @@ function UsageLimitRow(props: {
       <span className="usage-limit-reset">{props.secondaryValue ?? formatResetAt(props.window.resetAt)}</span>
     </div>
   );
+}
+
+function buildClaudeStatus(limits: UsageLimitsSnapshot["claude"] | undefined, sharedError: string | null) {
+  if (!limits) {
+    return sharedError ? `Unavailable: ${sharedError}` : "Loading...";
+  }
+  if (!limits.configured) {
+    return "Claude Code auth not found";
+  }
+  return limits.error;
 }
 
 function buildCodexStatus(limits: UsageLimitsSnapshot["codex"] | undefined, sharedError: string | null) {
@@ -983,7 +1059,7 @@ function createReportOptions(defaults: AppDefaults, from: string, to: string): A
     timezone: defaults.timezone,
     codexRoot: defaults.codexRoot,
     outDir: defaults.outDir,
-    sources: ["codex", "cursor"],
+    sources: ["codex", "cursor", "claude"],
     cursorAppDir: defaults.cursorAppDir,
     cursorCliConfigPath: defaults.cursorCliConfigPath,
   };

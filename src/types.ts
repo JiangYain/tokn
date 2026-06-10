@@ -7,7 +7,8 @@ export interface RawUsage {
 }
 
 export interface CodexUsageEvent extends RawUsage {
-  source: "codex";
+  // claude-code 事件复用 Codex 事件结构与聚合管道，仅以 source 区分
+  source: "codex" | "claude-code";
   sessionId: string;
   sessionPath: string;
   timestampMs: number;
@@ -73,7 +74,7 @@ export interface ReportOptions {
   from: string;
   to: string;
   timezone: string;
-  sources: Array<"codex" | "cursor">;
+  sources: Array<"codex" | "cursor" | "claude">;
   outDir: string;
   codexRoot: string;
   cursorSessionToken?: string;
