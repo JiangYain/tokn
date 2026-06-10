@@ -11,6 +11,7 @@ declare global {
       openExternal: (targetUrl: string) => Promise<void>;
       pickDirectory: (currentPath?: string) => Promise<string | null>;
       runReport: (options: AppReportOptions) => Promise<GenerateReportResult>;
+      setPanelPinned: (pinned: boolean) => Promise<boolean>;
       getUsageLimits: () => Promise<UsageLimitsSnapshot>;
       inspectCursorAuth: (options: AppReportOptions) => Promise<CursorAuth>;
     };

@@ -27,15 +27,24 @@ export function resolveCursorPaths(options?: {
   cursorCliConfigPath?: string;
 }): CursorPaths {
   const homeDir = options?.homeDir || os.homedir();
-  const appDir =
-    options?.cursorAppDir ||
-    path.join(process.env.APPDATA || path.join(homeDir, "AppData", "Roaming"), "Cursor");
+  const appDir = options?.cursorAppDir || defaultCursorAppDir(homeDir);
 
   return {
     appDir,
     stateDbPath: path.join(appDir, "User", "globalStorage", "state.vscdb"),
     cliConfigPath: options?.cursorCliConfigPath || path.join(homeDir, ".cursor", "cli-config.json"),
   };
+}
+
+/** 按操作系统解析 Cursor 应用数据目录：macOS → ~/Library/Application Support，Windows → %APPDATA%，Linux → ~/.config */
+function defaultCursorAppDir(homeDir: string): string {
+  if (process.platform === "darwin") {
+    return path.join(homeDir, "Library", "Application Support", "Cursor");
+  }
+  if (process.platform === "win32") {
+    return path.join(process.env.APPDATA || path.join(homeDir, "AppData", "Roaming"), "Cursor");
+  }
+  return path.join(process.env.XDG_CONFIG_HOME || path.join(homeDir, ".config"), "Cursor");
 }
 
 export function resolveCursorAuth(options: CursorLoadOptions): CursorAuth {

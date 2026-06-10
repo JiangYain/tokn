@@ -42,6 +42,16 @@ export interface CodexUsageLimits {
   secondaryWindow: UsageLimitWindow | null;
 }
 
+export interface ClaudeUsageLimits {
+  configured: boolean;
+  error: string | null;
+  planType: string | null;
+  /** 5 小时滚动窗口 */
+  primaryWindow: UsageLimitWindow | null;
+  /** 7 天滚动窗口 */
+  secondaryWindow: UsageLimitWindow | null;
+}
+
 export interface CursorUsageLimits {
   configured: boolean;
   error: string | null;
@@ -59,6 +69,7 @@ export interface UsageLimitsSnapshot {
   fetchedAt: string;
   codex: CodexUsageLimits;
   cursor: CursorUsageLimits;
+  claude: ClaudeUsageLimits;
 }
 
 export interface GenerateReportResult {
@@ -72,6 +83,12 @@ export interface GenerateReportResult {
   counts: {
     codexEvents: number;
     cursorEvents: number;
+  };
+  /** 各来源在报告区间内的 token 合计，用于前端按用量排序、隐藏未使用的服务卡片 */
+  sourceTotals: {
+    codex: number;
+    claude: number;
+    cursor: number;
   };
   rows: DailyUsageRow[];
   summary: {

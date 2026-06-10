@@ -94,15 +94,15 @@ function readOption(argv: string[], name: string): string | undefined {
   return value;
 }
 
-function parseSources(value: string): Array<"codex" | "cursor"> {
+function parseSources(value: string): Array<"codex" | "cursor" | "claude"> {
   const parts = value
     .split(",")
     .map((item) => item.trim().toLowerCase())
     .filter(Boolean);
 
-  const valid = new Set<"codex" | "cursor">();
+  const valid = new Set<"codex" | "cursor" | "claude">();
   for (const part of parts) {
-    if (part !== "codex" && part !== "cursor") {
+    if (part !== "codex" && part !== "cursor" && part !== "claude") {
       throw new Error(`Unsupported source: ${part}`);
     }
     valid.add(part);

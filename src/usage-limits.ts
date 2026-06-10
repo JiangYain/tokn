@@ -1,6 +1,10 @@
+import { execFile } from "node:child_process";
 import fs from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
-import type { CodexUsageLimits, CursorUsageLimits, UsageLimitsSnapshot, UsageLimitWindow } from "./contracts.js";
+import { promisify } from "node:util";
+import type { ClaudeUsageLimits, CodexUsageLimits, CursorUsageLimits, UsageLimitsSnapshot, UsageLimitWindow } from "./contracts.js";
+import { loadClaudeCodeEvents } from "./claude-code.js";
 import { resolveCursorAuth } from "./cursor.js";
 import { defaultTimezone, resolveDefaultCodexRoot } from "./util.js";
 
@@ -12,6 +16,13 @@ const CODEX_WEEKLY_WINDOW_SECONDS = 604_800;
 const CODEX_REFRESH_THRESHOLD_MS = 8 * 24 * 60 * 60 * 1000;
 const CURSOR_SUMMARY_URL = "https://cursor.com/api/usage-summary";
 const CURSOR_LEGACY_REQUEST_LIMIT = 500;
+const CLAUDE_USAGE_URL = "https://api.anthropic.com/api/oauth/usage";
+const CLAUDE_OAUTH_BETA = "oauth-2025-04-20";
+const CLAUDE_KEYCHAIN_SERVICE = "Claude Code-credentials";
+const CLAUDE_SESSION_WINDOW_SECONDS = 18_000;
+const CLAUDE_WEEKLY_WINDOW_SECONDS = 604_800;
+
+const execFileAsync = promisify(execFile);
 
 interface CodexAuthJson {
   tokens?: {
@@ -451,8 +462,160 @@ function percentFromUsedLimit(usedRaw: unknown, limitRaw: unknown) {
   return (used / limit) * 100;
 }
 
+/**
+ * 读取 Claude Code 本机 OAuth 凭据中的 accessToken。
+ * 优先读 ~/.claude/.credentials.json（Windows / Linux / 关闭钥匙串的 macOS），
+ * macOS 默认存钥匙串（service = "Claude Code-credentials"），用 security CLI 读取。
+ */
+async function readClaudeAccessToken(): Promise<string | null> {
+  const parseToken = (raw: string): string | null => {
+    try {
+      const parsed = JSON.parse(raw) as { claudeAiOauth?: { accessToken?: string } };
+      return normalizeString(parsed.claudeAiOauth?.accessToken);
+    } catch {
+      return null;
+    }
+  };
+
+  try {
+    const raw = await fs.readFile(path.join(os.homedir(), ".claude", ".credentials.json"), "utf8");
+    const token = parseToken(raw);
+    if (token) {
+      return token;
+    }
+  } catch {
+    // 文件不存在则继续尝试钥匙串
+  }
+
+  if (process.platform === "darwin") {
+    try {
+      const { stdout } = await execFileAsync(
+        "security",
+        ["find-generic-password", "-s", CLAUDE_KEYCHAIN_SERVICE, "-w"],
+        { timeout: 10_000 },
+      );
+      return parseToken(stdout.trim());
+    } catch {
+      return null;
+    }
+  }
+
+  return null;
+}
+
+/**
+ * 查询 Claude Code 限额。
+ * 优先调官方 OAuth usage 接口（与 Claude Code 内置 /usage 同源）；
+ * 该接口目前对第三方客户端返回 403 "Request not allowed"，失败时回退本地估算：
+ * 用 ~/.claude 会话日志计算 5 小时滚动窗口用量，占比以近 35 天观测到的最大 5 小时块为基准。
+ */
+async function fetchClaudeUsageLimits(): Promise<ClaudeUsageLimits> {
+  const accessToken = await readClaudeAccessToken();
+  if (!accessToken) {
+    return {
+      configured: false,
+      error: "Claude Code auth not found",
+      planType: null,
+      primaryWindow: null,
+      secondaryWindow: null,
+    };
+  }
+
+  const response = await fetch(CLAUDE_USAGE_URL, {
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "anthropic-beta": CLAUDE_OAUTH_BETA,
+      "anthropic-version": "2023-06-01",
+      Accept: "application/json",
+    },
+  });
+
+  if (response.ok) {
+    const body = (await response.json()) as Record<string, unknown>;
+    const fiveHour = (body.five_hour ?? null) as Record<string, unknown> | null;
+    const sevenDay = (body.seven_day ?? null) as Record<string, unknown> | null;
+    return {
+      configured: true,
+      error: null,
+      planType: normalizeString(body.subscription_type) ?? normalizeString(body.plan_type),
+      primaryWindow: buildWindow({
+        usedPercent: fiveHour?.utilization,
+        resetAt: (fiveHour?.resets_at as string | number | null | undefined) ?? null,
+        limitWindowSeconds: CLAUDE_SESSION_WINDOW_SECONDS,
+      }),
+      secondaryWindow: buildWindow({
+        usedPercent: sevenDay?.utilization,
+        resetAt: (sevenDay?.resets_at as string | number | null | undefined) ?? null,
+        limitWindowSeconds: CLAUDE_WEEKLY_WINDOW_SECONDS,
+      }),
+    };
+  }
+
+  // 官方接口不可用（403 等）→ 本地估算兜底
+  return estimateClaudeLimitsLocally();
+}
+
+/**
+ * 本地估算 Claude Code 5 小时窗口用量：
+ * - 当前窗口用量 = 最近 5 小时内的 token 合计；重置时间 = 当前活跃块首条消息所在整点 + 5h
+ * - 占比基准 = 近 35 天内观测到的最大 5 小时滑动窗口用量（近似个人额度上限）
+ */
+async function estimateClaudeLimitsLocally(): Promise<ClaudeUsageLimits> {
+  const timezone = defaultTimezone();
+  const now = Date.now();
+  const toDate = new Date(now);
+  const fromDate = new Date(now - 35 * 24 * 60 * 60 * 1000);
+  const toIso = toDate.toISOString().slice(0, 10);
+  const fromIso = fromDate.toISOString().slice(0, 10);
+
+  const events = await loadClaudeCodeEvents({ timezone, from: fromIso, to: toIso });
+  const windowMs = CLAUDE_SESSION_WINDOW_SECONDS * 1000;
+
+  // 当前 5 小时窗口内的事件与用量
+  const currentEvents = events.filter((event) => event.timestampMs > now - windowMs);
+  const currentTokens = currentEvents.reduce((sum, event) => sum + event.totalTokens, 0);
+
+  // 滑动窗口扫描历史最大 5 小时块（双指针，事件已按时间升序）
+  let maxWindowTokens = 0;
+  let windowSum = 0;
+  let left = 0;
+  for (let right = 0; right < events.length; right += 1) {
+    windowSum += events[right]!.totalTokens;
+    while (events[right]!.timestampMs - events[left]!.timestampMs > windowMs) {
+      windowSum -= events[left]!.totalTokens;
+      left += 1;
+    }
+    maxWindowTokens = Math.max(maxWindowTokens, windowSum);
+  }
+
+  // 重置时间：当前活跃块从首条消息所在整点起算，持续 5 小时
+  const firstCurrent = currentEvents[0];
+  const resetAt = firstCurrent
+    ? new Date(Math.floor(firstCurrent.timestampMs / 3_600_000) * 3_600_000 + windowMs).toISOString()
+    : null;
+
+  const usedPercent = maxWindowTokens > 0 ? (currentTokens / maxWindowTokens) * 100 : 0;
+
+  return {
+    configured: true,
+    error: null,
+    // note 槽位展示估算口径，提示这不是官方百分比
+    planType: "local est.",
+    primaryWindow: buildWindow({
+      usedPercent,
+      resetAt,
+      limitWindowSeconds: CLAUDE_SESSION_WINDOW_SECONDS,
+    }),
+    secondaryWindow: null,
+  };
+}
+
 export async function getUsageLimitsSnapshot(): Promise<UsageLimitsSnapshot> {
-  const [codexResult, cursorResult] = await Promise.allSettled([fetchCodexUsageLimits(), fetchCursorUsageLimits()]);
+  const [codexResult, cursorResult, claudeResult] = await Promise.allSettled([
+    fetchCodexUsageLimits(),
+    fetchCursorUsageLimits(),
+    fetchClaudeUsageLimits(),
+  ]);
   const codex =
     codexResult.status === "fulfilled"
       ? codexResult.value
@@ -479,9 +642,21 @@ export async function getUsageLimitsSnapshot(): Promise<UsageLimitsSnapshot> {
           rawPlanRemaining: null,
         };
 
+  const claude =
+    claudeResult.status === "fulfilled"
+      ? claudeResult.value
+      : {
+          configured: true,
+          error: claudeResult.reason instanceof Error ? claudeResult.reason.message : String(claudeResult.reason),
+          planType: null,
+          primaryWindow: null,
+          secondaryWindow: null,
+        };
+
   return {
     fetchedAt: new Date().toISOString(),
     codex,
     cursor,
+    claude,
   };
 }

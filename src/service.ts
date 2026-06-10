@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { loadCodexEvents, codexEventRowsForCsv } from "./codex.js";
+import { loadClaudeCodeEvents } from "./claude-code.js";
 import { loadCursorEvents } from "./cursor.js";
 import { computeEstimatedPricing } from "./pricing.js";
 import { buildDailyCsvRows, buildDailyRows, buildMarkdownReport, summarizeRows } from "./report.js";
@@ -41,7 +42,7 @@ function aggregateModelUsage(
 }
 
 export async function generateReport(options: ReportOptions): Promise<GenerateReportResult> {
-  const codexEvents = options.sources.includes("codex")
+  const codexOnlyEvents = options.sources.includes("codex")
     ? await loadCodexEvents({
         codexRoot: options.codexRoot,
         timezone: options.timezone,
@@ -49,6 +50,17 @@ export async function generateReport(options: ReportOptions): Promise<GenerateRe
         to: options.to,
       })
     : [];
+
+  // Claude Code 事件与 Codex 同构，合并进同一条聚合/定价管道（DailyUsageRow 的 codex* 列 = Codex + Claude 合计）
+  const claudeEvents = options.sources.includes("claude")
+    ? await loadClaudeCodeEvents({
+        timezone: options.timezone,
+        from: options.from,
+        to: options.to,
+      })
+    : [];
+
+  const codexEvents = [...codexOnlyEvents, ...claudeEvents].sort((a, b) => a.timestampMs - b.timestampMs);
 
   const cursorLoad = options.sources.includes("cursor")
     ? await loadCursorEvents({
@@ -168,12 +180,21 @@ export async function generateReport(options: ReportOptions): Promise<GenerateRe
     "utf8",
   );
 
+  // 各来源 token 合计（Claude 在事件层与 Codex 分开统计，便于前端区分展示）
+  const sumTokens = (events: Array<{ totalTokens: number }>) =>
+    events.reduce((sum, event) => sum + event.totalTokens, 0);
+
   return {
     outDir: options.outDir,
     files,
     counts: {
       codexEvents: codexEvents.length,
       cursorEvents: cursorLoad.events.length,
+    },
+    sourceTotals: {
+      codex: sumTokens(codexOnlyEvents),
+      claude: sumTokens(claudeEvents),
+      cursor: sumTokens(cursorLoad.events),
     },
     rows,
     summary,
