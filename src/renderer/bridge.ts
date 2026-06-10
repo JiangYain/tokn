@@ -1,11 +1,14 @@
-import type { AppDefaults, AppReportOptions, GenerateReportResult, ModelUsageEntry } from "../contracts.js";
+import type { AppDefaults, AppReportOptions, GenerateReportResult, ModelUsageEntry, UsageLimitsSnapshot } from "../contracts.js";
 import type { CursorAuth, DailyUsageRow } from "../types.js";
 
 export interface TokenMonitorBridge {
   mode: "desktop" | "web" | "preview";
   getDefaults: () => Promise<AppDefaults>;
+  launchLocal: (appId: string) => Promise<void>;
+  openExternal: (targetUrl: string) => Promise<void>;
   pickDirectory: (currentPath?: string) => Promise<string | null>;
   runReport: (options: AppReportOptions) => Promise<GenerateReportResult>;
+  getUsageLimits: () => Promise<UsageLimitsSnapshot>;
   inspectCursorAuth: (options: AppReportOptions) => Promise<CursorAuth>;
 }
 
@@ -32,6 +35,12 @@ function createWebBridge(): TokenMonitorBridge {
         method: "GET",
       });
     },
+    async launchLocal(_appId) {
+      window.open("https://claude.ai/", "_blank", "noopener,noreferrer");
+    },
+    async openExternal(targetUrl) {
+      window.open(targetUrl, "_blank", "noopener,noreferrer");
+    },
     async pickDirectory(currentPath) {
       const response = await fetch("/__token-monitor/pick-directory", {
         method: "POST",
@@ -52,6 +61,11 @@ function createWebBridge(): TokenMonitorBridge {
           "Content-Type": "application/json",
         },
         body: JSON.stringify(options),
+      });
+    },
+    async getUsageLimits() {
+      return fetchJson<UsageLimitsSnapshot>("/__token-monitor/usage-limits", {
+        method: "GET",
       });
     },
     async inspectCursorAuth(options) {
@@ -83,11 +97,41 @@ function createPreviewBridge(): TokenMonitorBridge {
         cursorCliConfigPath: "C:\\Users\\you\\.cursor\\cli-config.json",
       };
     },
+    async launchLocal(_appId) {
+      window.open("https://claude.ai/", "_blank", "noopener,noreferrer");
+    },
+    async openExternal(targetUrl) {
+      window.open(targetUrl, "_blank", "noopener,noreferrer");
+    },
     async pickDirectory(currentPath) {
       return currentPath ?? null;
     },
     async runReport(options) {
       return buildPreviewReport(options);
+    },
+    async getUsageLimits() {
+      return {
+        fetchedAt: new Date().toISOString(),
+        codex: {
+          configured: true,
+          error: null,
+          planType: "plus",
+          primaryWindow: { usedPercent: 78, resetAt: new Date(Date.now() + 14.5 * 60 * 60 * 1000).toISOString(), limitWindowSeconds: 18_000 },
+          secondaryWindow: { usedPercent: 75, resetAt: new Date(Date.now() + 4.2 * 24 * 60 * 60 * 1000).toISOString(), limitWindowSeconds: 604_800 },
+        },
+        cursor: {
+          configured: true,
+          error: null,
+          membershipType: "pro",
+          primaryWindow: { usedPercent: 64, resetAt: new Date(new Date().getFullYear(), new Date().getMonth() + 1, 1).toISOString() },
+          secondaryWindow: { usedPercent: 52, resetAt: new Date(new Date().getFullYear(), new Date().getMonth() + 1, 1).toISOString() },
+          tertiaryWindow: { usedPercent: 18, resetAt: new Date(new Date().getFullYear(), new Date().getMonth() + 1, 1).toISOString() },
+          requestLimit: 500,
+          rawPlanUsed: 254,
+          rawPlanLimit: 2000,
+          rawPlanRemaining: 1746,
+        },
+      };
     },
     async inspectCursorAuth() {
       return {

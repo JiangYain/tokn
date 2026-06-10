@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
-import type { AppDefaults, AppReportOptions, GenerateReportResult, ModelUsageEntry } from "../contracts.js";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import type { AppDefaults, AppReportOptions, GenerateReportResult, ModelUsageEntry, UsageLimitsSnapshot } from "../contracts.js";
 import type { DailyUsageRow } from "../types.js";
 import { getTokenMonitorBridge } from "./bridge.js";
 import { CZLogo } from "./CZLogo.js";
@@ -15,6 +15,12 @@ const SCALE_LABEL: Record<TimeScale, string> = {
   year: "Year",
   custom: "Custom",
 };
+const CURSOR_USAGE_URL = "https://cursor.com/dashboard/usage";
+const GAMMA_HOME_URL = "https://gamma.app/";
+const MANUS_HOME_URL = "https://manus.im/";
+const CHATGPT_WEB_URL = "https://chatgpt.com/";
+const GEMINI_WEB_URL = "https://gemini.google.com/";
+const STITCH_WEB_URL = "https://stitch.withgoogle.com/";
 
 const HEATMAP_LEVELS = 6;
 
@@ -23,6 +29,8 @@ export function App() {
   const [report, setReport] = useState<GenerateReportResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [usageLimits, setUsageLimits] = useState<UsageLimitsSnapshot | null>(null);
+  const [usageLimitsError, setUsageLimitsError] = useState<string | null>(null);
   const [autoloaded, setAutoloaded] = useState(false);
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
@@ -35,6 +43,7 @@ export function App() {
       setDateTo(value.to);
       setTimeScale("custom");
     });
+    void loadUsageLimits();
   }, []);
 
   const appOptions = useMemo<AppReportOptions | null>(() => {
@@ -59,14 +68,17 @@ export function App() {
 
     const syncOnFocus = () => {
       void syncDefaultsAndMaybeRefresh(false);
+      void loadUsageLimits();
     };
     const syncOnVisible = () => {
       if (document.visibilityState === "visible") {
         void syncDefaultsAndMaybeRefresh(false);
+        void loadUsageLimits();
       }
     };
     const timer = window.setInterval(() => {
       void syncDefaultsAndMaybeRefresh(false);
+      void loadUsageLimits();
     }, 60_000);
 
     window.addEventListener("focus", syncOnFocus);
@@ -87,6 +99,15 @@ export function App() {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function loadUsageLimits() {
+    try {
+      setUsageLimits(await bridge.getUsageLimits());
+      setUsageLimitsError(null);
+    } catch (err) {
+      setUsageLimitsError(err instanceof Error ? err.message : String(err));
     }
   }
 
@@ -202,6 +223,7 @@ export function App() {
                 if (dateFrom && dateTo) {
                   void syncDefaultsAndMaybeRefresh(true);
                 }
+                void loadUsageLimits();
               }}
               disabled={!appOptions || loading}
               aria-label={loading ? "Refreshing" : "Refresh"}
@@ -216,9 +238,7 @@ export function App() {
         {error && <div className="message message-error">{error}</div>}
 
         {!report ? (
-          <section className="empty-state">
-            <p>Loading data...</p>
-          </section>
+          <LoadingSkeleton />
         ) : (
           <>
             <section className="kpi-row">
@@ -279,6 +299,10 @@ export function App() {
               <CalendarHeatmap rows={report.rows} />
             </section>
 
+            <section className="panel panel-usage-surface">
+              <UsageLimitsBoard limits={usageLimits} error={usageLimitsError} />
+            </section>
+
             <section className="panel panel-aux">
               <div className="panel-top panel-top-stack">
                 <div>
@@ -301,6 +325,348 @@ export function App() {
       </main>
     </div>
   );
+}
+
+function LoadingSkeleton() {
+  return (
+    <div className="skeleton-shell" aria-hidden="true">
+      <section className="kpi-row skeleton-kpi-row">
+        {Array.from({ length: 4 }, (_, index) => (
+          <article key={index} className="kpi-card skeleton-kpi-card">
+            <span className="skeleton-block skeleton-label" />
+            <span className="skeleton-block skeleton-value" />
+            <span className="skeleton-block skeleton-sub" />
+          </article>
+        ))}
+      </section>
+
+      <section className="panel skeleton-panel">
+        <div className="panel-top panel-top-activity">
+          <span className="skeleton-block skeleton-heading" />
+          <div className="activity-controls">
+            <span className="skeleton-block skeleton-switch" />
+            <span className="skeleton-block skeleton-dates" />
+          </div>
+        </div>
+        <div className="skeleton-heatmap">
+          <span className="skeleton-block skeleton-heatmap-strip" />
+          <span className="skeleton-block skeleton-heatmap-strip" />
+          <span className="skeleton-block skeleton-heatmap-strip" />
+        </div>
+      </section>
+
+      <section className="panel panel-usage-surface skeleton-usage-panel">
+        <div className="usage-limits-grid">
+          <div className="usage-provider-card skeleton-usage-card">
+            <div className="usage-provider-head">
+              <span className="skeleton-block skeleton-logo" />
+              <span className="skeleton-block skeleton-note" />
+            </div>
+            <div className="usage-limit-list">
+              <div className="usage-limit-row">
+                <span className="skeleton-block skeleton-mini-label" />
+                <span className="skeleton-block skeleton-mini-bar" />
+                <span className="skeleton-block skeleton-mini-number" />
+                <span className="skeleton-block skeleton-mini-meta" />
+              </div>
+              <div className="usage-limit-row">
+                <span className="skeleton-block skeleton-mini-label" />
+                <span className="skeleton-block skeleton-mini-bar" />
+                <span className="skeleton-block skeleton-mini-number" />
+                <span className="skeleton-block skeleton-mini-meta" />
+              </div>
+            </div>
+          </div>
+
+          <div className="usage-provider-card skeleton-usage-card">
+            <div className="usage-provider-head">
+              <span className="skeleton-block skeleton-logo" />
+              <span className="skeleton-block skeleton-note" />
+            </div>
+            <div className="usage-limit-list">
+              <div className="usage-limit-row">
+                <span className="skeleton-block skeleton-mini-label" />
+                <span className="skeleton-block skeleton-mini-bar" />
+                <span className="skeleton-block skeleton-mini-number" />
+                <span className="skeleton-block skeleton-mini-meta" />
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function UsageLimitsBoard(props: { limits: UsageLimitsSnapshot | null; error: string | null }) {
+  return (
+    <div className="usage-limits-stack">
+      <div className="usage-limits-grid">
+        <UsageProviderCard
+          logoSrc="/brand-logos/codex.svg"
+          logoAlt="Codex"
+          note={null}
+          status={buildCodexStatus(props.limits?.codex, props.error)}
+        >
+          <UsageLimitRow label="5h" window={props.limits?.codex.primaryWindow ?? null} percentValue={getRemainingPercent(props.limits?.codex.primaryWindow ?? null)} />
+          <UsageLimitRow label="Week" window={props.limits?.codex.secondaryWindow ?? null} percentValue={getRemainingPercent(props.limits?.codex.secondaryWindow ?? null)} />
+        </UsageProviderCard>
+        <UsageProviderCard
+          logoSrc="/brand-logos/cursor.svg"
+          logoAlt="Cursor"
+          href={CURSOR_USAGE_URL}
+          note="500 req/mo"
+          status={buildCursorStatus(props.limits?.cursor, props.error)}
+        >
+          <UsageLimitRow
+            label="Month"
+            window={props.limits?.cursor.primaryWindow ?? null}
+            percentValue={getCursorDisplayPercent(props.limits?.cursor)}
+            secondaryValue={formatCursorRequests(props.limits?.cursor)}
+          />
+        </UsageProviderCard>
+      </div>
+      <div className="subscription-shortcuts">
+        <button
+          className="subscription-shortcut"
+          onClick={() => {
+            void bridge.launchLocal("claudeCode");
+          }}
+          type="button"
+          aria-label="Open Claude Code"
+          title="Claude Code"
+        >
+          <img className="subscription-shortcut-logo" src="/brand-logos/claude-code.svg" alt="Claude Code" />
+        </button>
+        <button
+          className="subscription-shortcut"
+          onClick={() => {
+            void bridge.launchLocal("opencode");
+          }}
+          type="button"
+          aria-label="Open OpenCode"
+          title="OpenCode"
+        >
+          <img className="subscription-shortcut-logo" src="/brand-logos/opencode.svg" alt="OpenCode" />
+        </button>
+        <button
+          className="subscription-shortcut"
+          onClick={() => {
+            void bridge.launchLocal("amp");
+          }}
+          type="button"
+          aria-label="Open Amp"
+          title="Amp"
+        >
+          <img className="subscription-shortcut-logo" src="/brand-logos/amp.svg" alt="Amp" />
+        </button>
+        <button
+          className="subscription-shortcut"
+          onClick={() => {
+            void bridge.openExternal(GAMMA_HOME_URL);
+          }}
+          type="button"
+          aria-label="Open Gamma"
+          title="Gamma"
+        >
+          <img className="subscription-shortcut-logo" src="/brand-logos/gamma.svg" alt="Gamma" />
+        </button>
+        <button
+          className="subscription-shortcut"
+          onClick={() => {
+            void bridge.openExternal(MANUS_HOME_URL);
+          }}
+          type="button"
+          aria-label="Open Manus"
+          title="Manus"
+        >
+          <img className="subscription-shortcut-logo" src="/brand-logos/manus.ico" alt="Manus" />
+        </button>
+        <button
+          className="subscription-shortcut"
+          onClick={() => {
+            void bridge.openExternal(CHATGPT_WEB_URL);
+          }}
+          type="button"
+          aria-label="Open ChatGPT Web"
+          title="ChatGPT Web"
+        >
+          <img className="subscription-shortcut-logo" src="/brand-logos/chatgpt-web.png" alt="ChatGPT Web" />
+        </button>
+        <button
+          className="subscription-shortcut"
+          onClick={() => {
+            void bridge.openExternal(GEMINI_WEB_URL);
+          }}
+          type="button"
+          aria-label="Open Gemini Web"
+          title="Gemini Web"
+        >
+          <img className="subscription-shortcut-logo" src="/brand-logos/gemini-web.png" alt="Gemini Web" />
+        </button>
+        <button
+          className="subscription-shortcut"
+          onClick={() => {
+            void bridge.openExternal(STITCH_WEB_URL);
+          }}
+          type="button"
+          aria-label="Open Stitch"
+          title="Stitch"
+        >
+          <img className="subscription-shortcut-logo" src="/brand-logos/stitch.png" alt="Stitch" />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function UsageProviderCard(props: {
+  logoSrc: string;
+  logoAlt: string;
+  href?: string;
+  note: string | null;
+  status: string | null;
+  footer?: string | null;
+  children: ReactNode;
+}) {
+  const isClickable = Boolean(props.href);
+  return (
+    <button
+      className={`usage-provider-card${isClickable ? " usage-provider-card-clickable" : ""}`}
+      onClick={() => {
+        if (props.href) {
+          void bridge.openExternal(props.href);
+        }
+      }}
+      type="button"
+    >
+      <div className="usage-provider-head">
+        <img className="usage-provider-logo" src={props.logoSrc} alt={props.logoAlt} />
+        {props.note ? <span className="usage-provider-note">{props.note}</span> : null}
+      </div>
+      {props.status ? (
+        <p className="usage-provider-status">{props.status}</p>
+      ) : (
+        <>
+          <div className="usage-limit-list">{props.children}</div>
+          {props.footer ? <p className="usage-provider-footer">{props.footer}</p> : null}
+        </>
+      )}
+    </button>
+  );
+}
+
+function UsageLimitRow(props: {
+  label: string;
+  window: UsageLimitsSnapshot["codex"]["primaryWindow"] | UsageLimitsSnapshot["cursor"]["primaryWindow"] | null;
+  percentValue?: number | null;
+  secondaryValue?: string | null;
+}) {
+  if (!props.window) {
+    return (
+      <div className="usage-limit-row usage-limit-row-empty">
+        <span className="usage-limit-label">{props.label}</span>
+        <span className="usage-limit-empty">-</span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="usage-limit-row">
+      <span className="usage-limit-label">{props.label}</span>
+      <div className="usage-limit-bar">
+        <div
+          className="usage-limit-bar-fill"
+          style={{ width: `${Math.max(2, props.percentValue ?? props.window.usedPercent)}%` }}
+        />
+      </div>
+      <span className="usage-limit-percent">{Math.round(props.percentValue ?? props.window.usedPercent)}%</span>
+      <span className="usage-limit-reset">{props.secondaryValue ?? formatResetAt(props.window.resetAt)}</span>
+    </div>
+  );
+}
+
+function buildCodexStatus(limits: UsageLimitsSnapshot["codex"] | undefined, sharedError: string | null) {
+  if (!limits) {
+    return sharedError ? `Unavailable: ${sharedError}` : "Loading...";
+  }
+  if (!limits.configured) {
+    return "Codex auth not found";
+  }
+  return limits.error;
+}
+
+function buildCursorStatus(limits: UsageLimitsSnapshot["cursor"] | undefined, sharedError: string | null) {
+  if (!limits) {
+    return sharedError ? `Unavailable: ${sharedError}` : "Loading...";
+  }
+  if (!limits.configured) {
+    return "Cursor auth not found";
+  }
+  return limits.error;
+}
+
+function formatCursorRequests(limits: UsageLimitsSnapshot["cursor"] | undefined) {
+  if (!limits?.requestLimit) {
+    return null;
+  }
+  const rawPercent =
+    limits.rawPlanUsed !== null &&
+    limits.rawPlanLimit !== null &&
+    limits.rawPlanLimit > 0
+      ? (limits.rawPlanUsed / limits.rawPlanLimit) * 100
+      : limits.primaryWindow?.usedPercent ?? null;
+  if (rawPercent === null) {
+    return null;
+  }
+  const used = Math.max(0, Math.round((rawPercent / 100) * limits.requestLimit));
+  return `${used}/${limits.requestLimit}`;
+}
+
+function getRemainingPercent(window: UsageLimitsSnapshot["codex"]["primaryWindow"] | null) {
+  if (!window) {
+    return null;
+  }
+  return Math.max(0, 100 - window.usedPercent);
+}
+
+function getCursorDisplayPercent(limits: UsageLimitsSnapshot["cursor"] | undefined) {
+  if (!limits) {
+    return null;
+  }
+  if (limits.rawPlanUsed !== null && limits.rawPlanLimit !== null && limits.rawPlanLimit > 0) {
+    return Math.max(0, (limits.rawPlanUsed / limits.rawPlanLimit) * 100);
+  }
+  if (!limits.primaryWindow) {
+    return null;
+  }
+  return limits.primaryWindow.usedPercent;
+}
+
+function formatResetAt(resetAt: string | number | null) {
+  if (!resetAt) {
+    return "-";
+  }
+
+  const date =
+    typeof resetAt === "number"
+      ? new Date(resetAt * 1000)
+      : new Date(resetAt);
+  if (!Number.isFinite(date.getTime())) {
+    return "-";
+  }
+
+  const now = new Date();
+  const sameDay =
+    date.getFullYear() === now.getFullYear() &&
+    date.getMonth() === now.getMonth() &&
+    date.getDate() === now.getDate();
+
+  if (sameDay) {
+    return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+  }
+
+  return `${date.getMonth() + 1}/${date.getDate()}`;
 }
 
 function KpiCard(props: { label: string; value: string; sub?: string; sub2?: string }) {

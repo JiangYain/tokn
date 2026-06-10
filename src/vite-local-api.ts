@@ -1,6 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Plugin, PreviewServer, ViteDevServer } from "vite";
-import { generateReport, getAppDefaults, inspectCursorAuth } from "./service.js";
+import { generateReport, getAppDefaults, getUsageLimitsSnapshot, inspectCursorAuth } from "./service.js";
 import type { AppReportOptions } from "./contracts.js";
 
 const API_PREFIX = "/__token-monitor";
@@ -37,6 +37,12 @@ function installMiddleware(server: ViteDevServer | PreviewServer): void {
       if (pathname === `${API_PREFIX}/report` && req.method === "POST") {
         const body = (await readJsonBody(req)) as AppReportOptions;
         const result = await generateReport(body);
+        sendJson(res, 200, result);
+        return;
+      }
+
+      if (pathname === `${API_PREFIX}/usage-limits` && req.method === "GET") {
+        const result = await getUsageLimitsSnapshot();
         sendJson(res, 200, result);
         return;
       }

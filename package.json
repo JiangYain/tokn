@@ -10,6 +10,7 @@
     "check": "tsc -p tsconfig.json --noEmit",
     "start": "electron .",
     "preview": "vite preview",
+    "export-heatmap": "tsx scripts/export-heatmap.ts",
     "report": "tsx src/index.ts report",
     "cursor-auth": "tsx src/index.ts cursor-auth"
   },

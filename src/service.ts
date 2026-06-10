@@ -8,6 +8,7 @@ import type { GenerateReportResult, ModelUsageEntry, PricingSummary } from "./co
 import type { CodexUsageEvent, CursorUsageEvent, ReportOptions } from "./types.js";
 import { ensureDir, oneYearAgoInZone, resolveDefaultCodexRoot, todayInZone, toCsv } from "./util.js";
 import { resolveCursorPaths, resolveCursorAuth } from "./cursor.js";
+import { getUsageLimitsSnapshot } from "./usage-limits.js";
 
 function aggregateModelUsage(
   codexEvents: CodexUsageEvent[],
@@ -194,15 +195,16 @@ function applyEstimatedCosts(
   }
 }
 
-export function getAppDefaults(timezone: string) {
+export function getAppDefaults(timezone: string, outDirBase?: string) {
   const today = todayInZone(timezone);
   const cursorPaths = resolveCursorPaths();
+  const reportRoot = outDirBase || path.join(process.cwd(), "reports");
   return {
     from: oneYearAgoInZone(timezone),
     to: today,
     timezone,
     codexRoot: resolveDefaultCodexRoot(),
-    outDir: path.join(process.cwd(), "reports", today),
+    outDir: path.join(reportRoot, today),
     cursorAppDir: cursorPaths.appDir,
     cursorCliConfigPath: cursorPaths.cliConfigPath,
   };
@@ -219,3 +221,5 @@ export function inspectCursorAuth(options: ReportOptions) {
     cursorCliConfigPath: options.cursorCliConfigPath,
   });
 }
+
+export { getUsageLimitsSnapshot };

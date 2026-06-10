@@ -1,18 +1,19 @@
 import path from "node:path";
+import { spawn } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { createServer } from "node:http";
-import { app, BrowserWindow, dialog, ipcMain, nativeImage, screen, Tray } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, nativeImage, screen, shell, Tray } from "electron";
 import type { Rectangle } from "electron";
 import type { Server } from "node:http";
 import { fileURLToPath } from "node:url";
 import { CZ_LOGO_TRAY_VIEW_BOX, getCzLogoSvgMarkup } from "../branding/cz-logo.js";
 import type { AppReportOptions } from "../contracts.js";
-import { generateReport, getAppDefaults, inspectCursorAuth } from "../service.js";
+import { generateReport, getAppDefaults, getUsageLimitsSnapshot, inspectCursorAuth } from "../service.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const isDev = !app.isPackaged;
 const PANEL_WIDTH = 400;
-const PANEL_HEIGHT = 328;
+const PANEL_HEIGHT = 352;
 const PANEL_MARGIN = 10;
 const PANEL_EDGE_MARGIN = 4;
 
@@ -310,7 +311,8 @@ if (!hasSingleInstanceLock) {
 
     ipcMain.handle("app:get-defaults", async () => {
       const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
-      return getAppDefaults(timezone);
+      const reportRoot = path.join(app.getPath("documents"), "Tokn Reports");
+      return getAppDefaults(timezone, reportRoot);
     });
 
     ipcMain.handle("app:pick-directory", async (_event, currentPath?: string) => {
@@ -321,8 +323,47 @@ if (!hasSingleInstanceLock) {
       return result.canceled ? null : result.filePaths[0] || null;
     });
 
+    ipcMain.handle("app:open-external", async (_event, targetUrl: string) => {
+      await shell.openExternal(targetUrl);
+    });
+
+    ipcMain.handle("app:launch-local", async (_event, appId: string) => {
+      if (appId === "claudeCode") {
+        const claudeCmd = path.join(process.env.APPDATA || "", "npm", "claude.cmd");
+        spawn("cmd.exe", ["/c", "start", "", claudeCmd], {
+          detached: true,
+          stdio: "ignore",
+          windowsHide: false,
+        }).unref();
+        return;
+      }
+      if (appId === "opencode") {
+        const openCodeCmd = path.join(process.env.APPDATA || "", "npm", "opencode.cmd");
+        spawn("cmd.exe", ["/c", "start", "", openCodeCmd], {
+          detached: true,
+          stdio: "ignore",
+          windowsHide: false,
+        }).unref();
+        return;
+      }
+      if (appId === "amp") {
+        const ampCmd = path.join(process.env.APPDATA || "", "npm", "amp.cmd");
+        spawn("cmd.exe", ["/c", "start", "", ampCmd], {
+          detached: true,
+          stdio: "ignore",
+          windowsHide: false,
+        }).unref();
+        return;
+      }
+      throw new Error(`Unsupported local app launch target: ${appId}`);
+    });
+
     ipcMain.handle("report:run", async (_event, options: AppReportOptions) => {
       return generateReport(options);
+    });
+
+    ipcMain.handle("usage:get-limits", async () => {
+      return getUsageLimitsSnapshot();
     });
 
     ipcMain.handle("cursor:inspect-auth", async (_event, options: AppReportOptions) => {
