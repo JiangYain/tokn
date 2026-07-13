@@ -22,6 +22,145 @@ interface EventEstimate {
   observedName: string;
 }
 
+const BUILTIN_PRICE_OVERRIDES: PriceMappingRow[] = [
+  // OpenAI standard API prices, USD per 1M tokens. GPT-5.6 cache writes are
+  // 1.25x uncached input and cache reads receive a 90% discount.
+  {
+    observed_name: "gpt-5.6-sol",
+    canonical_model_name: "gpt-5.6-sol",
+    pricing_context: "openai_api",
+    billing_unit: "usd_per_1m_tokens",
+    input_price: 5,
+    cached_input_price: 0.5,
+    cache_read_price: 0.5,
+    cache_write_price: 6.25,
+    output_price: 30,
+  },
+  {
+    observed_name: "gpt-5.6-terra",
+    canonical_model_name: "gpt-5.6-terra",
+    pricing_context: "openai_api",
+    billing_unit: "usd_per_1m_tokens",
+    input_price: 2.5,
+    cached_input_price: 0.25,
+    cache_read_price: 0.25,
+    cache_write_price: 3.125,
+    output_price: 15,
+  },
+  {
+    observed_name: "gpt-5.6-luna",
+    canonical_model_name: "gpt-5.6-luna",
+    pricing_context: "openai_api",
+    billing_unit: "usd_per_1m_tokens",
+    input_price: 1,
+    cached_input_price: 0.1,
+    cache_read_price: 0.1,
+    cache_write_price: 1.25,
+    output_price: 6,
+  },
+  {
+    observed_name: "gpt-5.5",
+    canonical_model_name: "gpt-5.5",
+    pricing_context: "openai_api",
+    billing_unit: "usd_per_1m_tokens",
+    input_price: 5,
+    cached_input_price: 0.5,
+    cache_read_price: 0.5,
+    cache_write_price: null,
+    output_price: 30,
+  },
+  {
+    observed_name: "gpt-5.4",
+    canonical_model_name: "gpt-5.4",
+    pricing_context: "openai_api",
+    billing_unit: "usd_per_1m_tokens",
+    input_price: 2.5,
+    cached_input_price: 0.25,
+    cache_read_price: 0.25,
+    cache_write_price: null,
+    output_price: 15,
+  },
+  // Cursor's public Composer 2.5 price only distinguishes input and output.
+  // Cache fields therefore deliberately fall back to the published input rate.
+  {
+    observed_name: "composer-2.5-fast",
+    canonical_model_name: "composer-2.5-fast",
+    pricing_context: "cursor_manual_provider_price",
+    billing_unit: "usd_per_1m_tokens",
+    input_price: 3,
+    cached_input_price: null,
+    cache_read_price: null,
+    cache_write_price: null,
+    output_price: 15,
+  },
+  {
+    observed_name: "gemini-3.5-flash",
+    canonical_model_name: "gemini-3.5-flash",
+    pricing_context: "gemini_api",
+    billing_unit: "usd_per_1m_tokens",
+    input_price: 1.5,
+    cached_input_price: 0.15,
+    cache_read_price: 0.15,
+    cache_write_price: 1.5,
+    output_price: 9,
+  },
+  {
+    observed_name: "claude-4.6-opus-max-thinking",
+    canonical_model_name: "claude-opus-4-6",
+    pricing_context: "anthropic_api",
+    billing_unit: "usd_per_1m_tokens",
+    input_price: 5,
+    cached_input_price: 0.5,
+    cache_read_price: 0.5,
+    cache_write_price: 6.25,
+    output_price: 25,
+  },
+  {
+    observed_name: "claude-fable-5-max",
+    canonical_model_name: "claude-fable-5",
+    pricing_context: "anthropic_api",
+    billing_unit: "usd_per_1m_tokens",
+    input_price: 10,
+    cached_input_price: 1,
+    cache_read_price: 1,
+    cache_write_price: 12.5,
+    output_price: 50,
+  },
+  {
+    observed_name: "claude-fable-5-thinking-max",
+    canonical_model_name: "claude-fable-5",
+    pricing_context: "anthropic_api",
+    billing_unit: "usd_per_1m_tokens",
+    input_price: 10,
+    cached_input_price: 1,
+    cache_read_price: 1,
+    cache_write_price: 12.5,
+    output_price: 50,
+  },
+  {
+    observed_name: "claude-opus-4-8-max",
+    canonical_model_name: "claude-opus-4-8",
+    pricing_context: "anthropic_api",
+    billing_unit: "usd_per_1m_tokens",
+    input_price: 5,
+    cached_input_price: 0.5,
+    cache_read_price: 0.5,
+    cache_write_price: 6.25,
+    output_price: 25,
+  },
+  {
+    observed_name: "claude-opus-4-8-thinking-max",
+    canonical_model_name: "claude-opus-4-8",
+    pricing_context: "anthropic_api",
+    billing_unit: "usd_per_1m_tokens",
+    input_price: 5,
+    cached_input_price: 0.5,
+    cache_read_price: 0.5,
+    cache_write_price: 6.25,
+    output_price: 25,
+  },
+];
+
 export interface PricingComputation {
   codexByDate: Map<string, number>;
   cursorByDate: Map<string, number>;
@@ -106,7 +245,8 @@ function estimateCodexEventUsd(event: CodexUsageEvent, rows: PriceMappingRow[]):
   const usd =
     usdForTokens(nonCachedInput, row.input_price) +
     usdForTokens(cachedInput, row.cached_input_price ?? row.cache_read_price ?? row.input_price) +
-    usdForTokens(event.outputTokens, row.output_price);
+    // Reasoning tokens are billed at output-token rates for reasoning models.
+    usdForTokens(event.outputTokens + event.reasoningOutputTokens, row.output_price);
 
   return { usd, mapped: true, observedName: event.model ?? "unknown" };
 }
@@ -200,7 +340,7 @@ async function loadPriceMappings(): Promise<{ rows: PriceMappingRow[]; mappingPa
     cachedRowsPromise = (async () => {
       const mappingPath = await resolveMappingPath();
       if (!mappingPath) {
-        return { rows: [], mappingPath: null };
+        return { rows: [...BUILTIN_PRICE_OVERRIDES], mappingPath: null };
       }
 
       const raw = await fs.readFile(mappingPath, "utf8");
@@ -211,7 +351,7 @@ async function loadPriceMappings(): Promise<{ rows: PriceMappingRow[]; mappingPa
           ? ((parsed as { items: PriceMappingRow[] }).items)
           : [];
 
-      return { rows, mappingPath };
+      return { rows: [...rows, ...BUILTIN_PRICE_OVERRIDES], mappingPath };
     })();
   }
 
