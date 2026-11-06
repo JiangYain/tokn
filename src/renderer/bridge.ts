@@ -164,6 +164,7 @@ function buildPreviewReport(options: AppReportOptions): GenerateReportResult {
 
   return {
     outDir: `${options.outDir}\\preview-mode`,
+    warnings: [],
     files: {
       dailyCsvPath: `${options.outDir}\\preview-daily-usage.csv`,
       dailyMarkdownPath: `${options.outDir}\\preview-daily-usage.md`,

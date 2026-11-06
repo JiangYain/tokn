@@ -16,6 +16,7 @@ interface CodexParseOptions {
 interface CodexLogPayload {
   type?: string;
   model?: string;
+  forked_from_id?: string;
   info?: {
     model?: string;
     last_token_usage?: Record<string, unknown>;
@@ -79,10 +80,16 @@ async function parseCodexSessionFile(
   const events: CodexUsageEvent[] = [];
   let previousTotals: RawUsage | null = null;
   let currentModel: string | null = null;
+  let skippingForkedHistory = false;
   const sessionId = path.relative(sessionsDir, filePath).replace(/\\/g, "/").replace(/\.jsonl$/i, "");
 
   for await (const line of rl) {
-    if (!line.includes("\"token_count\"") && !line.includes("\"turn_context\"")) {
+    if (
+      !line.includes("\"token_count\"") &&
+      !line.includes("\"turn_context\"") &&
+      !line.includes("\"session_meta\"") &&
+      !line.includes("\"inter_agent_communication_metadata\"")
+    ) {
       continue;
     }
 
@@ -90,6 +97,25 @@ async function parseCodexSessionFile(
     try {
       entry = JSON.parse(line) as CodexLogEntry;
     } catch {
+      continue;
+    }
+
+    // Forked subagent logs contain a serialized copy of the parent thread before
+    // the subagent's own inter-agent task metadata. Those copied token_count
+    // events are historical usage and must not be charged again.
+    if (entry.type === "session_meta" && entry.payload?.forked_from_id) {
+      skippingForkedHistory = true;
+      previousTotals = null;
+      continue;
+    }
+
+    if (entry.type === "inter_agent_communication_metadata") {
+      skippingForkedHistory = false;
+      previousTotals = null;
+      continue;
+    }
+
+    if (skippingForkedHistory) {
       continue;
     }
 

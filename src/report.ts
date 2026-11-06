@@ -1,4 +1,5 @@
 import type { CodexUsageEvent, CursorUsageEvent, DailyUsageRow, SummaryStats } from "./types.js";
+import type { ReportWarning } from "./contracts.js";
 import { addCodexDailyValues } from "./codex.js";
 import { addCursorDailyValues } from "./cursor.js";
 import { compareIsoDate, formatInt, formatUsd } from "./util.js";
@@ -118,12 +119,17 @@ export function buildMarkdownReport(params: {
   to: string;
   timezone: string;
   rows: DailyUsageRow[];
+  warnings?: ReportWarning[];
 }): string {
   const summary = summarizeRows(params.rows);
   const lines: string[] = [];
 
   lines.push("# Daily Token Usage Report");
   lines.push("");
+  for (const warning of params.warnings ?? []) {
+    lines.push(`> ${warning.source} usage unavailable; totals exclude this source. ${warning.message.replace(/\s+/g, " ")}`);
+    lines.push("");
+  }
   lines.push(`- Date range: ${params.from} .. ${params.to}`);
   lines.push(`- Timezone: ${params.timezone}`);
   lines.push(`- Combined total tokens: ${formatInt(summary.combined.totalTokens)}`);

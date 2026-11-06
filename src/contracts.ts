@@ -62,6 +62,7 @@ export interface UsageLimitsSnapshot {
 }
 
 export interface GenerateReportResult {
+  warnings: ReportWarning[];
   outDir: string;
   files: {
     dailyCsvPath: string;
@@ -82,6 +83,11 @@ export interface GenerateReportResult {
   modelUsage: ModelUsageEntry[];
   cursorAuth: CursorAuth | null;
   pricingSummary: PricingSummary;
+}
+
+export interface ReportWarning {
+  source: "codex" | "cursor";
+  message: string;
 }
 
 export type AppReportOptions = ReportOptions;

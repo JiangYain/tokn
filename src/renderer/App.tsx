@@ -6,15 +6,6 @@ import { CZLogo } from "./CZLogo.js";
 
 const bridge = getTokenMonitorBridge();
 
-type TimeScale = "week" | "month" | "year" | "custom";
-
-const SCALE_ORDER: TimeScale[] = ["week", "month", "year", "custom"];
-const SCALE_LABEL: Record<TimeScale, string> = {
-  week: "Week",
-  month: "Month",
-  year: "Year",
-  custom: "Custom",
-};
 const CURSOR_USAGE_URL = "https://cursor.com/dashboard/usage";
 const GAMMA_HOME_URL = "https://gamma.app/";
 const MANUS_HOME_URL = "https://manus.im/";
@@ -32,16 +23,12 @@ export function App() {
   const [usageLimits, setUsageLimits] = useState<UsageLimitsSnapshot | null>(null);
   const [usageLimitsError, setUsageLimitsError] = useState<string | null>(null);
   const [autoloaded, setAutoloaded] = useState(false);
-  const [dateFrom, setDateFrom] = useState("");
-  const [dateTo, setDateTo] = useState("");
-  const [timeScale, setTimeScale] = useState<TimeScale>("custom");
+  const dateFrom = defaults?.from ?? "";
+  const dateTo = defaults?.to ?? "";
 
   useEffect(() => {
     void bridge.getDefaults().then((value) => {
       setDefaults(value);
-      setDateFrom(value.from);
-      setDateTo(value.to);
-      setTimeScale("custom");
     });
     void loadUsageLimits();
   }, []);
@@ -88,7 +75,7 @@ export function App() {
       window.removeEventListener("focus", syncOnFocus);
       document.removeEventListener("visibilitychange", syncOnVisible);
     };
-  }, [defaults, dateFrom, dateTo, timeScale]);
+  }, [defaults, dateFrom, dateTo]);
 
   async function runReport(options: AppReportOptions) {
     setLoading(true);
@@ -123,76 +110,12 @@ export function App() {
       nextDefaults.cursorAppDir !== defaults.cursorAppDir ||
       nextDefaults.cursorCliConfigPath !== defaults.cursorCliConfigPath;
 
-    if (!defaults || !dateFrom || !dateTo) {
-      if (defaultsChanged) {
-        setDefaults(nextDefaults);
-      }
-      setDateFrom(nextDefaults.from);
-      setDateTo(nextDefaults.to);
-      setTimeScale("custom");
-      if (forceRefresh) {
-        await runReport(createReportOptions(nextDefaults, nextDefaults.from, nextDefaults.to));
-      }
-      return;
-    }
-
-    let nextFrom = dateFrom;
-    let nextTo = dateTo;
-    let shouldRefresh = forceRefresh;
-
-    if (timeScale === "custom") {
-      if (dateTo === defaults.to) {
-        nextTo = nextDefaults.to;
-        if (dateFrom === defaults.from) {
-          nextFrom = nextDefaults.from;
-        }
-        shouldRefresh ||= nextFrom !== dateFrom || nextTo !== dateTo;
-      }
-    } else {
-      const nextRange = buildScaledRange(nextDefaults.to, timeScale);
-      nextFrom = nextRange.from;
-      nextTo = nextRange.to;
-      shouldRefresh ||= nextFrom !== dateFrom || nextTo !== dateTo;
-    }
-
     if (defaultsChanged) {
       setDefaults(nextDefaults);
     }
-
-    if (!shouldRefresh) {
-      return;
+    if (forceRefresh || defaultsChanged) {
+      await runReport(createReportOptions(nextDefaults, nextDefaults.from, nextDefaults.to));
     }
-
-    setDateFrom(nextFrom);
-    setDateTo(nextTo);
-    await runReport(createReportOptions(nextDefaults, nextFrom, nextTo));
-  }
-
-  function handleDateChange(from: string, to: string) {
-    setDateFrom(from);
-    setDateTo(to);
-    setTimeScale("custom");
-    if (!defaults) {
-      return;
-    }
-    void runReport(createReportOptions(defaults, from, to));
-  }
-
-  function handleScaleChange(nextScale: TimeScale) {
-    if (!defaults) {
-      return;
-    }
-    if (nextScale === "custom") {
-      setTimeScale("custom");
-      return;
-    }
-
-    const anchor = dateTo || defaults.to;
-    const range = buildScaledRange(anchor, nextScale);
-    setTimeScale(nextScale);
-    setDateFrom(range.from);
-    setDateTo(range.to);
-    void runReport(createReportOptions(defaults, range.from, range.to));
   }
 
   const today = dateTo || toIsoDate(new Date());
@@ -203,6 +126,15 @@ export function App() {
   const monthCost = monthRows.reduce((sum, row) => sum + row.combinedEstimatedCostUsd, 0);
   const todayTokens = todayData?.combinedTotalTokens ?? 0;
   const todayCost = todayData?.combinedEstimatedCostUsd ?? 0;
+
+  const todayCodexTokens = todayData?.codexTotalTokens ?? 0;
+  const todayCursorTokens = todayData?.cursorTotalTokens ?? 0;
+  const monthCodexTokens = monthRows.reduce((sum, row) => sum + row.codexTotalTokens, 0);
+  const monthCursorTokens = monthRows.reduce((sum, row) => sum + row.cursorTotalTokens, 0);
+  const todayCodexCost = todayData?.codexEstimatedCostUsd ?? 0;
+  const todayCursorCost = todayData?.cursorEstimatedCostUsd ?? 0;
+  const monthCodexCost = monthRows.reduce((sum, row) => sum + row.codexEstimatedCostUsd, 0);
+  const monthCursorCost = monthRows.reduce((sum, row) => sum + row.cursorEstimatedCostUsd, 0);
 
   return (
     <div className="app-shell">
@@ -236,6 +168,7 @@ export function App() {
         </header>
 
         {error && <div className="message message-error">{error}</div>}
+        <ReportWarnings warnings={report?.warnings ?? []} />
 
         {!report ? (
           <LoadingSkeleton />
@@ -261,46 +194,27 @@ export function App() {
             <section className="panel">
               <div className="panel-top panel-top-activity">
                 <h2>Activity</h2>
-                <div className="activity-controls">
-                  <div
-                    className="scale-switch"
-                    role="tablist"
-                    aria-label="Time scale"
-                    style={
-                      {
-                        "--scale-count": SCALE_ORDER.length,
-                        "--scale-index": Math.max(0, SCALE_ORDER.indexOf(timeScale)),
-                      } as CSSProperties
-                    }
-                  >
-                    <span className="scale-switch-indicator" aria-hidden="true" />
-                    {SCALE_ORDER.map((scale) => {
-                      const active = timeScale === scale;
-                      return (
-                        <button
-                          key={scale}
-                          role="tab"
-                          aria-selected={active}
-                          className={`scale-chip${active ? " scale-chip-active" : ""}`}
-                          onClick={() => handleScaleChange(scale)}
-                          type="button"
-                        >
-                          {SCALE_LABEL[scale]}
-                        </button>
-                      );
-                    })}
-                  </div>
-                  <div className="date-range">
-                    <input type="date" value={dateFrom} onChange={(event) => handleDateChange(event.target.value, dateTo)} />
-                    <input type="date" value={dateTo} onChange={(event) => handleDateChange(dateFrom, event.target.value)} />
-                  </div>
-                </div>
               </div>
               <CalendarHeatmap rows={report.rows} />
             </section>
 
             <section className="panel panel-usage-surface">
-              <UsageLimitsBoard limits={usageLimits} error={usageLimitsError} />
+              <UsageLimitsBoard
+                limits={usageLimits}
+                error={usageLimitsError}
+                codexUsage={{
+                  todayTokens: todayCodexTokens,
+                  todayCost: todayCodexCost,
+                  monthTokens: monthCodexTokens,
+                  monthCost: monthCodexCost,
+                }}
+                cursorUsage={{
+                  todayTokens: todayCursorTokens,
+                  todayCost: todayCursorCost,
+                  monthTokens: monthCursorTokens,
+                  monthCost: monthCursorCost,
+                }}
+              />
             </section>
 
             <section className="panel panel-aux">
@@ -327,6 +241,15 @@ export function App() {
   );
 }
 
+export function ReportWarnings({ warnings }: { warnings: GenerateReportResult["warnings"] }) {
+  return <>{warnings.map((warning) => (
+    <div className="message message-warning" role="status" key={warning.source}>
+      <strong>{warning.source === "cursor" ? "Cursor" : "Codex"} usage unavailable. </strong>
+      {warning.message} Totals exclude {warning.source === "cursor" ? "Cursor" : "Codex"} until it reconnects.
+    </div>
+  ))}</>;
+}
+
 function LoadingSkeleton() {
   return (
     <div className="skeleton-shell" aria-hidden="true">
@@ -343,10 +266,6 @@ function LoadingSkeleton() {
       <section className="panel skeleton-panel">
         <div className="panel-top panel-top-activity">
           <span className="skeleton-block skeleton-heading" />
-          <div className="activity-controls">
-            <span className="skeleton-block skeleton-switch" />
-            <span className="skeleton-block skeleton-dates" />
-          </div>
         </div>
         <div className="skeleton-heatmap">
           <span className="skeleton-block skeleton-heatmap-strip" />
@@ -398,7 +317,19 @@ function LoadingSkeleton() {
   );
 }
 
-function UsageLimitsBoard(props: { limits: UsageLimitsSnapshot | null; error: string | null }) {
+interface ProviderUsageStats {
+  todayTokens: number;
+  todayCost: number;
+  monthTokens: number;
+  monthCost: number;
+}
+
+export function UsageLimitsBoard(props: {
+  limits: UsageLimitsSnapshot | null;
+  error: string | null;
+  codexUsage?: ProviderUsageStats;
+  cursorUsage?: ProviderUsageStats;
+}) {
   return (
     <div className="usage-limits-stack">
       <div className="usage-limits-grid">
@@ -407,6 +338,7 @@ function UsageLimitsBoard(props: { limits: UsageLimitsSnapshot | null; error: st
           logoAlt="Codex"
           note={null}
           status={buildCodexStatus(props.limits?.codex, props.error)}
+          stats={props.codexUsage}
         >
           <UsageLimitRow label="5h" window={props.limits?.codex.primaryWindow ?? null} percentValue={getRemainingPercent(props.limits?.codex.primaryWindow ?? null)} />
           <UsageLimitRow label="Week" window={props.limits?.codex.secondaryWindow ?? null} percentValue={getRemainingPercent(props.limits?.codex.secondaryWindow ?? null)} />
@@ -415,14 +347,14 @@ function UsageLimitsBoard(props: { limits: UsageLimitsSnapshot | null; error: st
           logoSrc="/brand-logos/cursor.svg"
           logoAlt="Cursor"
           href={CURSOR_USAGE_URL}
-          note="500 req/mo"
+          note={null}
           status={buildCursorStatus(props.limits?.cursor, props.error)}
+          stats={props.cursorUsage}
         >
           <UsageLimitRow
             label="Month"
             window={props.limits?.cursor.primaryWindow ?? null}
-            percentValue={getCursorDisplayPercent(props.limits?.cursor)}
-            secondaryValue={formatCursorRequests(props.limits?.cursor)}
+            percentValue={getCursorRemainingPercent(props.limits?.cursor)}
           />
         </UsageProviderCard>
       </div>
@@ -526,6 +458,7 @@ function UsageProviderCard(props: {
   href?: string;
   note: string | null;
   status: string | null;
+  stats?: ProviderUsageStats;
   footer?: string | null;
   children: ReactNode;
 }) {
@@ -541,7 +474,23 @@ function UsageProviderCard(props: {
       type="button"
     >
       <div className="usage-provider-head">
-        <img className="usage-provider-logo" src={props.logoSrc} alt={props.logoAlt} />
+        <div className="usage-provider-brand">
+          <img className="usage-provider-logo" src={props.logoSrc} alt={props.logoAlt} />
+        </div>
+        {props.stats ? (
+          <div className="usage-provider-consumption">
+            <div
+              className="usage-consumption-row"
+              title={`Today: ${fmtNum(props.stats.todayTokens)} tokens (${fmtChineseCompact(props.stats.todayTokens)}) · ${fmtUsd(props.stats.todayCost)}`}
+            >
+              <span className="usage-consumption-tag">Today</span>
+              <span className="usage-consumption-tokens">{fmtCompact(props.stats.todayTokens)}</span>
+              <span className="usage-consumption-cost">{fmtUsdCompact(props.stats.todayCost)}</span>
+            </div>
+          </div>
+        ) : (
+          <div className="usage-provider-consumption" />
+        )}
         {props.note ? <span className="usage-provider-note">{props.note}</span> : null}
       </div>
       {props.status ? (
@@ -560,9 +509,9 @@ function UsageLimitRow(props: {
   label: string;
   window: UsageLimitsSnapshot["codex"]["primaryWindow"] | UsageLimitsSnapshot["cursor"]["primaryWindow"] | null;
   percentValue?: number | null;
-  secondaryValue?: string | null;
 }) {
-  if (!props.window) {
+  const remainingPercent = props.percentValue ?? getRemainingPercent(props.window);
+  if (!props.window || remainingPercent === null) {
     return (
       <div className="usage-limit-row usage-limit-row-empty">
         <span className="usage-limit-label">{props.label}</span>
@@ -572,16 +521,17 @@ function UsageLimitRow(props: {
   }
 
   return (
-    <div className="usage-limit-row">
+    <div className="usage-limit-row" title={`${props.label}: ${Math.round(remainingPercent)}% remaining`}>
       <span className="usage-limit-label">{props.label}</span>
-      <div className="usage-limit-bar">
+      <div className="usage-limit-bar" role="progressbar" aria-label={`${props.label} remaining quota`}
+        aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(remainingPercent)}>
         <div
           className="usage-limit-bar-fill"
-          style={{ width: `${Math.max(2, props.percentValue ?? props.window.usedPercent)}%` }}
+          style={{ width: `${remainingPercent}%` }}
         />
       </div>
-      <span className="usage-limit-percent">{Math.round(props.percentValue ?? props.window.usedPercent)}%</span>
-      <span className="usage-limit-reset">{props.secondaryValue ?? formatResetAt(props.window.resetAt)}</span>
+      <span className="usage-limit-percent">{Math.round(remainingPercent)}%</span>
+      <span className="usage-limit-reset">{formatResetAt(props.window.resetAt)}</span>
     </div>
   );
 }
@@ -606,41 +556,23 @@ function buildCursorStatus(limits: UsageLimitsSnapshot["cursor"] | undefined, sh
   return limits.error;
 }
 
-function formatCursorRequests(limits: UsageLimitsSnapshot["cursor"] | undefined) {
-  if (!limits?.requestLimit) {
-    return null;
-  }
-  const rawPercent =
-    limits.rawPlanUsed !== null &&
-    limits.rawPlanLimit !== null &&
-    limits.rawPlanLimit > 0
-      ? (limits.rawPlanUsed / limits.rawPlanLimit) * 100
-      : limits.primaryWindow?.usedPercent ?? null;
-  if (rawPercent === null) {
-    return null;
-  }
-  const used = Math.max(0, Math.round((rawPercent / 100) * limits.requestLimit));
-  return `${used}/${limits.requestLimit}`;
-}
-
 function getRemainingPercent(window: UsageLimitsSnapshot["codex"]["primaryWindow"] | null) {
-  if (!window) {
+  if (!window || !Number.isFinite(window.usedPercent)) {
     return null;
   }
-  return Math.max(0, 100 - window.usedPercent);
+  return Math.min(100, Math.max(0, 100 - window.usedPercent));
 }
 
-function getCursorDisplayPercent(limits: UsageLimitsSnapshot["cursor"] | undefined) {
+function getCursorRemainingPercent(limits: UsageLimitsSnapshot["cursor"] | undefined) {
   if (!limits) {
     return null;
   }
-  if (limits.rawPlanUsed !== null && limits.rawPlanLimit !== null && limits.rawPlanLimit > 0) {
-    return Math.max(0, (limits.rawPlanUsed / limits.rawPlanLimit) * 100);
+  const { rawPlanUsed, rawPlanLimit } = limits;
+  if (rawPlanUsed !== null && Number.isFinite(rawPlanUsed) &&
+      rawPlanLimit !== null && Number.isFinite(rawPlanLimit) && rawPlanLimit > 0) {
+    return Math.min(100, Math.max(0, (1 - rawPlanUsed / rawPlanLimit) * 100));
   }
-  if (!limits.primaryWindow) {
-    return null;
-  }
-  return limits.primaryWindow.usedPercent;
+  return getRemainingPercent(limits.primaryWindow);
 }
 
 function formatResetAt(resetAt: string | number | null) {
@@ -987,22 +919,4 @@ function createReportOptions(defaults: AppDefaults, from: string, to: string): A
     cursorAppDir: defaults.cursorAppDir,
     cursorCliConfigPath: defaults.cursorCliConfigPath,
   };
-}
-
-function buildScaledRange(anchorIso: string, scale: Exclude<TimeScale, "custom">) {
-  const anchor = new Date(`${anchorIso}T00:00:00`);
-  const to = toIsoDate(anchor);
-  const fromDate = new Date(anchor);
-
-  if (scale === "week") {
-    const day = fromDate.getDay();
-    const diff = day === 0 ? 6 : day - 1;
-    fromDate.setDate(fromDate.getDate() - diff);
-  } else if (scale === "month") {
-    fromDate.setDate(1);
-  } else {
-    fromDate.setFullYear(fromDate.getFullYear() - 1);
-  }
-
-  return { from: toIsoDate(fromDate), to };
 }

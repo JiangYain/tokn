@@ -6,6 +6,7 @@ import { parse as parseCsv } from "csv-parse/sync";
 import { DateTime } from "luxon";
 import type { CursorAuth, CursorPaths, CursorUsageEvent, DailyUsageRow } from "./types.js";
 import { isDateInRange, parseInteger, parseMoney, readJwtExpiryIso } from "./util.js";
+import { decodeCursorAccessToken } from "./cursor-token.js";
 
 interface CursorLoadOptions {
   timezone: string;
@@ -76,7 +77,7 @@ export function resolveCursorAuth(options: CursorLoadOptions): CursorAuth {
     throw new Error(`Cursor state database not found: ${paths.stateDbPath}`);
   }
 
-  const jwt = readCursorAccessToken(paths.stateDbPath);
+  const jwt = readCursorAccessToken(paths.stateDbPath, paths.appDir);
   if (!jwt) {
     throw new Error("Could not read Cursor access token from state.vscdb");
   }
@@ -96,12 +97,13 @@ export function resolveCursorAuth(options: CursorLoadOptions): CursorAuth {
   };
 }
 
-function readCursorAccessToken(stateDbPath: string): string | null {
+function readCursorAccessToken(stateDbPath: string, cursorAppDir: string): string | null {
   const { DatabaseSync } = require("node:sqlite") as typeof import("node:sqlite");
-  const db = new DatabaseSync(stateDbPath);
+  const db = new DatabaseSync(stateDbPath, { readOnly: true });
   try {
     const row = db.prepare(CURSOR_TOKEN_SQL).get() as { value?: unknown } | undefined;
-    return typeof row?.value === "string" && row.value.trim() ? row.value.trim() : null;
+    return typeof row?.value === "string" && row.value.trim()
+      ? decodeCursorAccessToken(row.value.trim(), cursorAppDir) : null;
   } finally {
     db.close();
   }
@@ -187,6 +189,7 @@ async function fetchCursorUsageCsv(options: {
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36",
     },
     redirect: "follow",
+    signal: AbortSignal.timeout(15_000),
   });
 
   if (response.status === 401 || response.status === 403) {
