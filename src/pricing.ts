@@ -3,21 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import type { PricingSummary } from "./contracts.js";
 import type { CodexUsageEvent, CursorUsageEvent } from "./types.js";
-
-interface PriceMappingRow {
-  observed_name: string;
-  canonical_model_name: string | null;
-  pricing_context: string;
-  billing_unit: string;
-  input_price: number | null;
-  cached_input_price: number | null;
-  cache_read_price: number | null;
-  cache_write_price: number | null;
-  output_price: number | null;
-  long_context_threshold?: number;
-  long_context_input_multiplier?: number;
-  long_context_output_multiplier?: number;
-}
+import { VERIFIED_PRICE_UPDATES, type PriceMappingRow } from "./model-prices.js";
 
 interface EventEstimate {
   usd: number;
@@ -26,6 +12,7 @@ interface EventEstimate {
 }
 
 const BUILTIN_PRICE_OVERRIDES: PriceMappingRow[] = [
+  ...VERIFIED_PRICE_UPDATES,
   // OpenAI standard API prices, USD per 1M tokens. Cache writes are 1.25x
   // uncached input and cache reads receive a 90% discount.
   {
@@ -309,6 +296,15 @@ export async function computeEstimatedPricing(
   cursorEvents: CursorUsageEvent[],
 ): Promise<PricingComputation> {
   const { rows, mappingPath } = await loadPriceMappings();
+  return calculateEstimatedPricing(codexEvents, cursorEvents, rows, mappingPath);
+}
+
+export function calculateEstimatedPricing(
+  codexEvents: CodexUsageEvent[],
+  cursorEvents: CursorUsageEvent[],
+  rows: PriceMappingRow[] = BUILTIN_PRICE_OVERRIDES,
+  mappingPath: string | null = null,
+): PricingComputation {
   const codexByDate = new Map<string, number>();
   const cursorByDate = new Map<string, number>();
   const codexByModel = new Map<string, number>();
@@ -385,8 +381,8 @@ function estimateCodexEventUsd(event: CodexUsageEvent, rows: PriceMappingRow[]):
       cachedInput,
       multiplyPrice(row.cached_input_price ?? row.cache_read_price ?? row.input_price, inputMultiplier),
     ) +
-    // Reasoning tokens are billed at output-token rates for reasoning models.
-    usdForTokens(event.outputTokens + event.reasoningOutputTokens, multiplyPrice(row.output_price, outputMultiplier));
+    // Codex reasoning_output_tokens is a subset of output_tokens, not an extra charge.
+    usdForTokens(event.outputTokens, multiplyPrice(row.output_price, outputMultiplier));
 
   return { usd, mapped: true, observedName: event.model ?? "unknown" };
 }
@@ -401,11 +397,16 @@ function estimateCursorEventUsd(event: CursorUsageEvent, rows: PriceMappingRow[]
     return { usd: 0, mapped: false, observedName: event.model || "unknown" };
   }
 
+  const promptTokens = event.inputTokens + event.cacheWriteTokens + event.cacheReadTokens;
+  const usesLongContextPricing =
+    row.long_context_threshold != null && promptTokens > row.long_context_threshold;
+  const inputMultiplier = usesLongContextPricing ? (row.long_context_input_multiplier ?? 1) : 1;
+  const outputMultiplier = usesLongContextPricing ? (row.long_context_output_multiplier ?? 1) : 1;
   const usd =
-    usdForTokens(event.inputTokens, row.input_price) +
-    usdForTokens(event.cacheWriteTokens, row.cache_write_price ?? row.input_price) +
-    usdForTokens(event.cacheReadTokens, row.cache_read_price ?? row.cached_input_price ?? row.input_price) +
-    usdForTokens(event.outputTokens, row.output_price);
+    usdForTokens(event.inputTokens, multiplyPrice(row.input_price, inputMultiplier)) +
+    usdForTokens(event.cacheWriteTokens, multiplyPrice(row.cache_write_price ?? row.input_price, inputMultiplier)) +
+    usdForTokens(event.cacheReadTokens, multiplyPrice(row.cache_read_price ?? row.cached_input_price ?? row.input_price, inputMultiplier)) +
+    usdForTokens(event.outputTokens, multiplyPrice(row.output_price, outputMultiplier));
 
   return { usd, mapped: true, observedName: event.model || "unknown" };
 }
@@ -495,11 +496,16 @@ async function loadPriceMappings(): Promise<{ rows: PriceMappingRow[]; mappingPa
           ? ((parsed as { items: PriceMappingRow[] }).items)
           : [];
 
-      return { rows: [...rows, ...BUILTIN_PRICE_OVERRIDES], mappingPath };
+      return { rows: mergePriceMappings(rows), mappingPath };
     })();
   }
 
   return cachedRowsPromise;
+}
+
+export function mergePriceMappings(externalRows: PriceMappingRow[]): PriceMappingRow[] {
+  // Context ranking stays source-specific; equal-context legacy JSON cannot shadow updates.
+  return [...BUILTIN_PRICE_OVERRIDES, ...externalRows];
 }
 
 async function resolveMappingPath(): Promise<string | null> {

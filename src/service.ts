@@ -4,8 +4,8 @@ import { loadCodexEvents, codexEventRowsForCsv } from "./codex.js";
 import { loadCursorEvents } from "./cursor.js";
 import { computeEstimatedPricing } from "./pricing.js";
 import { buildDailyCsvRows, buildDailyRows, buildMarkdownReport, summarizeRows } from "./report.js";
-import type { GenerateReportResult, ModelUsageEntry, PricingSummary } from "./contracts.js";
-import type { CodexUsageEvent, CursorUsageEvent, ReportOptions } from "./types.js";
+import type { GenerateReportResult, ModelUsageEntry, PricingSummary, ReportWarning } from "./contracts.js";
+import type { CodexUsageEvent, CursorAuth, CursorUsageEvent, ReportOptions } from "./types.js";
 import { ensureDir, oneYearAgoInZone, resolveDefaultCodexRoot, todayInZone, toCsv } from "./util.js";
 import { resolveCursorPaths, resolveCursorAuth } from "./cursor.js";
 import { getUsageLimitsSnapshot } from "./usage-limits.js";
@@ -50,8 +50,11 @@ export async function generateReport(options: ReportOptions): Promise<GenerateRe
       })
     : [];
 
-  const cursorLoad = options.sources.includes("cursor")
-    ? await loadCursorEvents({
+  const warnings: ReportWarning[] = [];
+  let cursorLoad: { auth: CursorAuth | null; events: CursorUsageEvent[] } = { auth: null, events: [] };
+  if (options.sources.includes("cursor")) {
+    try {
+      cursorLoad = await loadCursorEvents({
         timezone: options.timezone,
         from: options.from,
         to: options.to,
@@ -59,8 +62,11 @@ export async function generateReport(options: ReportOptions): Promise<GenerateRe
         cookieHeader: options.cursorCookie,
         cursorAppDir: options.cursorAppDir,
         cursorCliConfigPath: options.cursorCliConfigPath,
-      })
-    : { auth: null, events: [] };
+      });
+    } catch (error) {
+      warnings.push({ source: "cursor", message: error instanceof Error ? error.message : String(error) });
+    }
+  }
 
   const pricing = await computeEstimatedPricing(codexEvents, cursorLoad.events);
   const rows = buildDailyRows(options.from, options.to, codexEvents, cursorLoad.events);
@@ -77,6 +83,7 @@ export async function generateReport(options: ReportOptions): Promise<GenerateRe
     to: options.to,
     timezone: options.timezone,
     rows,
+    warnings,
   });
 
   await ensureDir(options.outDir);
@@ -169,6 +176,7 @@ export async function generateReport(options: ReportOptions): Promise<GenerateRe
   );
 
   return {
+    warnings,
     outDir: options.outDir,
     files,
     counts: {

@@ -1,6 +1,6 @@
 {
   "name": "tokn",
-  "version": "0.1.0",
+  "version": "0.1.2",
   "description": "Tray-first token usage monitor for Codex and Cursor on Windows.",
   "type": "module",
   "main": "dist-electron/main.js",
@@ -8,6 +8,7 @@
     "dev": "vite",
     "build": "tsc -p tsconfig.json && vite build",
     "check": "tsc -p tsconfig.json --noEmit",
+    "test": "tsx --test tests/pricing.test.ts tests/usage-display.test.ts tests/cursor-auth.test.ts tests/service.test.ts",
     "start": "electron .",
     "preview": "vite preview",
     "export-heatmap": "tsx scripts/export-heatmap.ts",

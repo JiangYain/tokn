@@ -43,15 +43,14 @@ function Copy-AppPayload {
   Copy-Item -LiteralPath (Join-Path $SourceRoot "dist") -Destination (Join-Path $TargetAppDir "dist") -Recurse -Force
   Copy-Item -LiteralPath (Join-Path $SourceRoot "dist-electron") -Destination (Join-Path $TargetAppDir "dist-electron") -Recurse -Force
 
-  $packageJson = @'
-{
-  "name": "tokn",
-  "productName": "Tokn",
-  "version": "0.1.0",
-  "main": "dist-electron/main.js",
-  "type": "module"
-}
-'@
+  $sourcePackage = Get-Content -LiteralPath (Join-Path $SourceRoot "package.json") -Raw | ConvertFrom-Json
+  $packageJson = [ordered]@{
+    name = "tokn"
+    productName = "Tokn"
+    version = $sourcePackage.version
+    main = "dist-electron/main.js"
+    type = "module"
+  } | ConvertTo-Json
 
   Set-Content -LiteralPath (Join-Path $TargetAppDir "package.json") -Value $packageJson -Encoding UTF8
 }

@@ -145,8 +145,7 @@ code {
 }
 
 .btn-refresh,
-.btn-secondary,
-.scale-chip {
+.btn-secondary {
   transition:
     border-color 160ms ease,
     background-color 160ms ease,
@@ -228,6 +227,12 @@ code {
   color: var(--accent);
 }
 
+.message-warning {
+  border-color: var(--line-strong);
+  background: var(--bg);
+  color: var(--text);
+}
+
 .empty-state {
   padding: 84px 0;
   text-align: center;
@@ -290,16 +295,6 @@ code {
 .skeleton-heading {
   width: 90px;
   height: 30px;
-}
-
-.skeleton-switch {
-  width: 184px;
-  height: 28px;
-}
-
-.skeleton-dates {
-  width: 164px;
-  height: 28px;
 }
 
 .skeleton-heatmap {
@@ -461,89 +456,6 @@ th {
   color: var(--text-soft);
   font-size: 12px;
   line-height: 1.65;
-}
-
-.activity-controls {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.scale-switch {
-  --scale-count: 4;
-  --scale-index: 0;
-  position: relative;
-  display: grid;
-  grid-template-columns: repeat(var(--scale-count), minmax(58px, 1fr));
-  align-items: stretch;
-  height: 28px;
-  border: 1px solid var(--line-strong);
-  background: var(--bg);
-  isolation: isolate;
-}
-
-.scale-switch-indicator {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: 0;
-  width: calc(100% / var(--scale-count));
-  background: var(--accent);
-  transform: translateX(calc(var(--scale-index) * 100%));
-  transition: transform var(--motion-glide), background-color var(--motion-glide);
-  pointer-events: none;
-  z-index: 0;
-}
-
-.scale-chip {
-  position: relative;
-  z-index: 1;
-  height: 100%;
-  padding: 0 10px;
-  border: none;
-  background: transparent;
-  color: var(--text-soft);
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-  transition: color var(--motion-glide);
-}
-
-.scale-chip:hover {
-  color: var(--text-strong);
-}
-
-.scale-chip-active,
-.scale-chip-active:hover {
-  color: var(--bg);
-}
-
-.date-range {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.date-range input[type="date"] {
-  height: 28px;
-  padding: 0 10px;
-  border: 1px solid var(--line);
-  background: var(--bg);
-  color: var(--text);
-  font-size: 11.5px;
-  font-variant-numeric: tabular-nums;
-  outline: none;
-  transition: border-color 160ms ease, box-shadow 160ms ease;
-}
-
-.date-range input[type="date"]:hover {
-  border-color: var(--line-strong);
-}
-
-.date-range input[type="date"]:focus {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 2px var(--accent-faint);
 }
 
 .heatmap-wrap {
@@ -864,12 +776,6 @@ tbody tr:hover {
     gap: 14px;
   }
 
-  .activity-controls {
-    width: 100%;
-    flex-direction: column;
-    align-items: flex-start;
-  }
-
   .heatmap-body {
     overflow-x: auto;
   }
@@ -1044,43 +950,6 @@ tbody tr:hover {
     align-items: center;
   }
 
-  .activity-controls {
-    width: auto;
-    flex: 1;
-    display: grid;
-    grid-template-columns: minmax(128px, 0.62fr) minmax(166px, 0.9fr);
-    align-items: center;
-    justify-content: end;
-    gap: 4px;
-  }
-
-  .scale-switch {
-    width: 100%;
-    grid-template-columns: repeat(var(--scale-count), minmax(0, 1fr));
-    height: 22px;
-  }
-
-  .scale-chip {
-    padding: 0 1px;
-    font-size: 6px;
-    letter-spacing: 0.06em;
-  }
-
-  .date-range {
-    width: 100%;
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 3px;
-  }
-
-  .date-range input[type="date"] {
-    min-width: 0;
-    width: 100%;
-    height: 22px;
-    padding: 0 3px;
-    font-size: 7.5px;
-  }
-
   .heatmap-wrap {
     --cell-size: 4px;
     --cell-gap: 2px;
@@ -1173,10 +1042,17 @@ tbody tr:hover {
 
   .usage-provider-head {
     display: flex;
-    align-items: baseline;
+    align-items: center;
     justify-content: space-between;
     gap: 6px;
     margin-bottom: 5px;
+    min-height: 18px;
+  }
+
+  .usage-provider-brand {
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
   }
 
   .usage-provider-logo {
@@ -1185,6 +1061,45 @@ tbody tr:hover {
     height: 16px;
     flex-shrink: 0;
     color: var(--text-strong);
+  }
+
+  .usage-provider-consumption {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 1.5px;
+    flex: 1;
+    min-width: 0;
+    margin-left: auto;
+  }
+
+  .usage-consumption-row {
+    display: flex;
+    align-items: baseline;
+    justify-content: flex-end;
+    gap: 5px;
+    font-size: 8px;
+    line-height: 1.15;
+    white-space: nowrap;
+  }
+
+  .usage-consumption-tag {
+    color: var(--text-faint);
+    font-size: 7px;
+    font-weight: 500;
+    letter-spacing: 0.02em;
+    flex-shrink: 0;
+  }
+
+  .usage-consumption-tokens {
+    color: var(--text-strong);
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .usage-consumption-cost {
+    color: var(--text-soft);
+    font-variant-numeric: tabular-nums;
   }
 
   .usage-provider-note,
@@ -1312,16 +1227,6 @@ tbody tr:hover {
   .skeleton-heading {
     width: 62px;
     height: 20px;
-  }
-
-  .skeleton-switch {
-    width: 128px;
-    height: 22px;
-  }
-
-  .skeleton-dates {
-    width: 166px;
-    height: 22px;
   }
 
   .skeleton-heatmap {

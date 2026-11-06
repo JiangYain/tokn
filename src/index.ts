@@ -29,6 +29,9 @@ async function main(): Promise<void> {
 
 async function runReport(options: ReportOptions): Promise<void> {
   const result = await generateReport(options);
+  for (const warning of result.warnings) {
+    process.stderr.write(`Warning: ${warning.source} usage unavailable; totals exclude this source. ${warning.message}\n`);
+  }
   const authSource = result.cursorAuth ? result.cursorAuth.source : "skipped";
   process.stdout.write(
     [
